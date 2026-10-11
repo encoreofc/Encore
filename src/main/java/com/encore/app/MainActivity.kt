@@ -21,26 +21,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-
-private val EncoreColors = darkColorScheme(
-    primary = Color(0xFF3D8BEB),
-    onPrimary = Color(0xFFFFFFFF),
-    background = Color(0xFF17191C),
-    onBackground = Color(0xFFE6E6E6),
-    surface = Color(0xFF17191C),
-    onSurface = Color(0xFFE6E6E6),
-    error = Color(0xFFE5665C)
-)
 
 private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -54,9 +42,10 @@ private fun <T> background(work: () -> T, done: (Result<T>) -> Unit) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        edgeToEdgeLight()
         val prefs = getSharedPreferences("encore", Context.MODE_PRIVATE)
         setContent {
-            MaterialTheme(colorScheme = EncoreColors) {
+            EncoreTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var user by remember {
                         mutableStateOf<User?>(
@@ -146,19 +135,5 @@ private fun AuthScreen(onDone: (User) -> Unit) {
         TextButton(onClick = { creating = !creating; error = null }, enabled = !busy) {
             Text(if (creating) "I already have an account" else "Create a new account")
         }
-    }
-}
-
-@Composable
-private fun HomeScreen(user: User, onLogout: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .systemBarsPadding()
-            .padding(24.dp)
-    ) {
-        Text("Signed in as @${user.username}")
-        Spacer(Modifier.height(16.dp))
-        TextButton(onClick = onLogout) { Text("Log out") }
     }
 }
