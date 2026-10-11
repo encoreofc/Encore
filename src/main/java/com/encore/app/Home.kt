@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -29,7 +30,7 @@ import androidx.compose.ui.unit.sp
 
 private val homeHandler = Handler(Looper.getMainLooper())
 
-private fun <T> runIo(work: () -> T, done: (Result<T>) -> Unit) {
+internal fun <T> runIo(work: () -> T, done: (Result<T>) -> Unit) {
     Thread {
         val r = runCatching(work)
         homeHandler.post { done(r) }
@@ -37,7 +38,7 @@ private fun <T> runIo(work: () -> T, done: (Result<T>) -> Unit) {
 }
 
 @Composable
-private fun Ticker(ms: Long, key: Any, action: () -> Unit) {
+internal fun Ticker(ms: Long, key: Any, action: () -> Unit) {
     val latest by rememberUpdatedState(action)
     DisposableEffect(key) {
         var alive = true
@@ -52,6 +53,34 @@ private fun Ticker(ms: Long, key: Any, action: () -> Unit) {
         onDispose {
             alive = false
             homeHandler.removeCallbacks(tick)
+        }
+    }
+}
+
+class SoonState {
+    var text by mutableStateOf<String?>(null)
+    private val hide = Runnable { text = null }
+
+    fun show(what: String) {
+        text = what
+        homeHandler.removeCallbacks(hide)
+        homeHandler.postDelayed(hide, 1800)
+    }
+}
+
+@Composable
+fun BoxScope.SoonToast(state: SoonState, bottom: Dp) {
+    state.text?.let {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = bottom)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Ui.ink)
+                .padding(horizontal = 18.dp, vertical = 10.dp)
+        ) {
+            Text("$it · Coming soon", color = Ui.onInk, fontSize = 14.sp)
         }
     }
 }
@@ -98,7 +127,7 @@ private fun timeLabel(ms: Long): String {
 private val avatarTones = listOf(0xFFE3E8EF, 0xFFEADFD5, 0xFFDDE7DF, 0xFFE9DDE6, 0xFFDDE5EA, 0xFFEDE6D2)
 
 @Composable
-private fun Avatar(c: Contact, size: Dp) {
+fun Avatar(c: Contact, size: Dp) {
     val tone = Color(avatarTones[(c.id % avatarTones.size).toInt()])
     Box(
         modifier = Modifier
@@ -109,7 +138,7 @@ private fun Avatar(c: Contact, size: Dp) {
     ) {
         Text(
             c.username.take(1).uppercase(),
-            color = Ui.ink,
+            color = Color(0xFF111111),
             fontWeight = FontWeight.Medium,
             fontSize = (size.value * 0.4f).sp
         )
@@ -155,7 +184,7 @@ private fun StartChatDialog(user: User, onDismiss: () -> Unit, onStarted: (Conta
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
+        containerColor = Ui.bg,
         title = { Text("New chat") },
         text = {
             Column {
@@ -178,34 +207,51 @@ private fun StartChatDialog(user: User, onDismiss: () -> Unit, onStarted: (Conta
     )
 }
 
+@Composable
+private fun ThemeDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Ui.bg,
+        title = { Text("Theme") },
+        text = {
+            Column {
+                listOf("system" to "System default", "light" to "Light", "dark" to "Dark").forEach { (key, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { ThemeStore.set(ctx, key) }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = ThemeStore.mode == key, onClick = { ThemeStore.set(ctx, key) })
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) {
-    var items by remember { mutableStateOf<List<Preview>>(emptyList()) }
+    var chats by remember { mutableStateOf<List<Preview>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
-    var soon by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf(false) }
     var startDialog by remember { mutableStateOf(false) }
+    var themeDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-
-    val hideSoon = remember {
-        object : Runnable {
-            override fun run() {
-                soon = null
-            }
-        }
-    }
-
-    fun showSoon(what: String) {
-        soon = what
-        homeHandler.removeCallbacks(hideSoon)
-        homeHandler.postDelayed(hideSoon, 1800)
-    }
+    val soon = remember { SoonState() }
+    val dash = Ui.muted.copy(alpha = 0.7f)
 
     fun refresh() {
         runIo({ loadPreviews(user.id) }) { r ->
             r.onSuccess {
-                items = it
+                chats = it
                 loaded = true
             }
         }
@@ -216,7 +262,7 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(Ui.bg)
     ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
@@ -231,26 +277,29 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { showSoon("Search") }) {
+                IconButton(onClick = { soon.show("Search") }) {
                     Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.ink)
                 }
             }
 
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 item {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable { showSoon("Stories") }
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { soon.show("Stories") }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(64.dp)
                                 .drawBehind {
                                     drawCircle(
-                                        color = Ui.muted.copy(alpha = 0.7f),
+                                        color = dash,
                                         style = Stroke(
                                             width = 1.5.dp.toPx(),
                                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f))
@@ -265,10 +314,13 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                         Text("Add story", fontSize = 12.sp, color = Ui.muted)
                     }
                 }
-                items(items.take(10), key = { it.contact.id }) { p ->
+                items(chats.take(10), key = { it.contact.id }) { p ->
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable { showSoon("Stories") }
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { soon.show("Stories") }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -303,6 +355,13 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
+                            text = { Text("Theme") },
+                            onClick = {
+                                menu = false
+                                themeDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Log out") },
                             onClick = {
                                 menu = false
@@ -313,7 +372,7 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                 }
             }
 
-            if (loaded && items.isEmpty()) {
+            if (loaded && chats.isEmpty()) {
                 Text(
                     "No chats yet. Tap New Chat to start one.",
                     color = Ui.muted,
@@ -322,7 +381,7 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
             }
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(items, key = { it.contact.id }) { p ->
+                items(chats, key = { it.contact.id }) { p ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -365,7 +424,9 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(Icons.Default.Home, contentDescription = "Chats", tint = Ui.ink)
+                Box(modifier = Modifier.padding(10.dp)) {
+                    Icon(Icons.Default.Home, contentDescription = "Chats", tint = Ui.ink)
+                }
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(24.dp))
@@ -374,47 +435,37 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                         .padding(horizontal = 22.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Ui.onInk)
                     Spacer(Modifier.width(6.dp))
-                    Text("New Chat", color = Color.White, fontWeight = FontWeight.Medium)
+                    Text("New Chat", color = Ui.onInk, fontWeight = FontWeight.Medium)
                 }
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = "Profile",
-                    tint = Ui.muted,
-                    modifier = Modifier.clickable { showSoon("Profile") }
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable { soon.show("Profile") }
+                        .padding(10.dp)
+                ) {
+                    Icon(Icons.Default.Person, contentDescription = "Profile", tint = Ui.muted)
+                }
             }
         }
 
-        soon?.let {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 84.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Ui.ink)
-                    .padding(horizontal = 18.dp, vertical = 10.dp)
-            ) {
-                Text("$it · Coming soon", color = Color.White, fontSize = 14.sp)
-            }
-        }
+        SoonToast(soon, 84.dp)
     }
 
     if (sheet) {
-        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = Color.White) {
+        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = Ui.bg) {
             SheetRow(Icons.Default.Email, "New Chat", "Send a message to your contact") {
                 sheet = false
                 startDialog = true
             }
             SheetRow(Icons.Default.AccountCircle, "New Contact", "Add a contact to be able to send messages") {
                 sheet = false
-                showSoon("New contact")
+                soon.show("New contact")
             }
             SheetRow(Icons.Default.Face, "New Community", "Join the community around you") {
                 sheet = false
-                showSoon("Communities")
+                soon.show("Communities")
             }
             Spacer(Modifier.height(8.dp))
             Button(
@@ -437,5 +488,9 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                 onOpen(it)
             }
         )
+    }
+
+    if (themeDialog) {
+        ThemeDialog(onDismiss = { themeDialog = false })
     }
 }
