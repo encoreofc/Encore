@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
                             user = u
                         }
                     } else {
-                        HomeScreen(current) {
+                        ChatApp(current) {
                             prefs.edit().clear().apply()
                             user = null
                         }
