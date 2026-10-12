@@ -2,14 +2,31 @@ package com.encore.app
 
 import org.json.JSONObject
 
-data class ReplyInfo(val id: String, val senderId: String?, val body: String?, val deleted: Boolean)
+data class Media(
+    val name: String,
+    val size: Long,
+    val type: String,
+    val w: Int,
+    val h: Int,
+    val dur: Long,
+    val localUri: String? = null
+)
+
+data class ReplyInfo(
+    val id: String,
+    val senderId: String?,
+    val body: String?,
+    val deleted: Boolean,
+    val kind: String? = null
+)
 
 data class MsgItem(
     val msg: Msg,
     val editedAt: Long?,
     val fwdFrom: String?,
     val replyTo: String?,
-    val reply: ReplyInfo?
+    val reply: ReplyInfo?,
+    val media: Media? = null
 )
 
 data class Synced(val items: List<MsgItem>, val reactions: Map<String, List<Pair<String, String>>>)
@@ -18,12 +35,25 @@ private fun JSONObject.str(key: String): String? = if (isNull(key)) null else ge
 
 fun parseItem(o: JSONObject): MsgItem {
     val r = o.optJSONObject("reply")
+    val mm = o.optJSONObject("media")?.optJSONObject("meta")
     return MsgItem(
         msg = Api.parseMsg(o),
         editedAt = o.optLong("edited_at", 0L).takeIf { it > 0 },
         fwdFrom = o.str("fwd_from"),
         replyTo = o.str("reply_to"),
-        reply = r?.let { ReplyInfo(it.getString("id"), it.str("sender_id"), it.str("body"), it.optBoolean("deleted")) }
+        reply = r?.let {
+            ReplyInfo(it.getString("id"), it.str("sender_id"), it.str("body"), it.optBoolean("deleted"), it.str("kind"))
+        },
+        media = mm?.let {
+            Media(
+                it.str("name") ?: "file",
+                it.optLong("size", 0L),
+                it.str("type") ?: "",
+                it.optInt("w"),
+                it.optInt("h"),
+                it.optLong("dur")
+            )
+        }
     )
 }
 
