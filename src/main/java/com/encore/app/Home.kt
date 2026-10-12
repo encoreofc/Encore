@@ -85,39 +85,6 @@ fun BoxScope.SoonToast(state: SoonState, bottom: Dp) {
     }
 }
 
-data class Preview(val contact: Contact, val last: String?, val time: Long?)
-
-private var tablesReady = false
-
-private fun loadPreviews(me: Long): List<Preview> {
-    if (!tablesReady) {
-        Db.query(
-            "CREATE TABLE IF NOT EXISTS contacts (" +
-                "owner_id INTEGER NOT NULL, contact_id INTEGER NOT NULL, " +
-                "PRIMARY KEY (owner_id, contact_id))"
-        )
-        Db.query(
-            "CREATE TABLE IF NOT EXISTS messages (" +
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                "sender_id INTEGER NOT NULL, receiver_id INTEGER NOT NULL, " +
-                "body TEXT NOT NULL, created_at INTEGER NOT NULL)"
-        )
-        tablesReady = true
-    }
-    val between = "((m.sender_id = ? AND m.receiver_id = u.id) OR (m.sender_id = u.id AND m.receiver_id = ?))"
-    val rows = Db.query(
-        "SELECT u.id, u.username, " +
-            "(SELECT m.body FROM messages m WHERE $between ORDER BY m.id DESC LIMIT 1), " +
-            "(SELECT m.created_at FROM messages m WHERE $between ORDER BY m.id DESC LIMIT 1) " +
-            "FROM users u WHERE u.id IN (SELECT contact_id FROM contacts WHERE owner_id = ?) " +
-            "OR u.id IN (SELECT receiver_id FROM messages WHERE sender_id = ?) " +
-            "OR u.id IN (SELECT sender_id FROM messages WHERE receiver_id = ?) " +
-            "ORDER BY 4 DESC, u.username",
-        me, me, me, me, me, me, me
-    )
-    return rows.map { Preview(Contact(it[0]!!.toLong(), it[1]!!), it[2], it[3]?.toLong()) }
-}
-
 private fun timeLabel(ms: Long): String {
     val recent = System.currentTimeMillis() - ms < 24L * 60 * 60 * 1000
     val pattern = if (recent) "HH:mm" else "dd MMM"
@@ -127,8 +94,8 @@ private fun timeLabel(ms: Long): String {
 private val avatarTones = listOf(0xFFE3E8EF, 0xFFEADFD5, 0xFFDDE7DF, 0xFFE9DDE6, 0xFFDDE5EA, 0xFFEDE6D2)
 
 @Composable
-fun Avatar(c: Contact, size: Dp) {
-    val tone = Color(avatarTones[(c.id % avatarTones.size).toInt()])
+fun Avatar(seed: String, name: String, size: Dp) {
+    val tone = Color(avatarTones[Math.floorMod(seed.hashCode(), avatarTones.size)])
     Box(
         modifier = Modifier
             .size(size)
@@ -137,7 +104,7 @@ fun Avatar(c: Contact, size: Dp) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            c.username.take(1).uppercase(),
+            name.take(1).uppercase(),
             color = Color(0xFF111111),
             fontWeight = FontWeight.Medium,
             fontSize = (size.value * 0.4f).sp
@@ -164,7 +131,7 @@ private fun SheetRow(icon: ImageVector, title: String, sub: String, onClick: () 
 }
 
 @Composable
-private fun StartChatDialog(user: User, onDismiss: () -> Unit, onStarted: (Contact) -> Unit) {
+private fun StartChatDialog(onDismiss: () -> Unit, onStarted: (Conv) -> Unit) {
     var name by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -173,11 +140,10 @@ private fun StartChatDialog(user: User, onDismiss: () -> Unit, onStarted: (Conta
         busy = true
         problem = null
         val n = name
-        runIo({ ChatDb.addContact(user.id, n) }) { r ->
+        runIo({ Api.startDm(n) }) { r ->
             busy = false
             r.onSuccess { onStarted(it) }.onFailure {
-                problem = if (it is DbException) it.message
-                else "Can't reach the server. Check your connection."
+                problem = if (it is ApiException) it.message else "Something went wrong"
             }
         }
     }
@@ -238,8 +204,8 @@ private fun ThemeDialog(onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) {
-    var chats by remember { mutableStateOf<List<Preview>>(emptyList()) }
+fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
+    var chats by remember { mutableStateOf<List<Conv>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
     var startDialog by remember { mutableStateOf(false) }
@@ -249,15 +215,24 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
     val dash = Ui.muted.copy(alpha = 0.7f)
 
     fun refresh() {
-        runIo({ loadPreviews(user.id) }) { r ->
+        runIo({ Api.conversations() }) { r ->
             r.onSuccess {
                 chats = it
                 loaded = true
+            }.onFailure {
+                if ((it as? ApiException)?.code == "unauthorized") onLogout()
             }
         }
     }
 
-    Ticker(5000L, user.id) { refresh() }
+    Ticker(30000L, me.id) { refresh() }
+
+    OnRealtime { e ->
+        when (e.optString("type")) {
+            "message", "read", "hello" -> refresh()
+            else -> {}
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -314,7 +289,8 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                         Text("Add story", fontSize = 12.sp, color = Ui.muted)
                     }
                 }
-                items(chats.take(10), key = { it.contact.id }) { p ->
+                items(chats.filter { it.peer != null }.take(10), key = { it.id }) { c ->
+                    val p = c.peer!!
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
@@ -328,11 +304,11 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
                                 .border(2.dp, Ui.ink, CircleShape)
                                 .padding(4.dp)
                         ) {
-                            Avatar(p.contact, 56.dp)
+                            Avatar(p.id, p.displayName, 56.dp)
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            p.contact.username,
+                            p.displayName,
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -381,35 +357,61 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
             }
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(chats, key = { it.contact.id }) { p ->
+                items(chats, key = { it.id }) { c ->
+                    val p = c.peer
+                    val name = p?.displayName ?: "Unknown"
+                    val last = c.last
+                    val preview = when {
+                        last == null -> "Say hello"
+                        last.deleted -> "Message deleted"
+                        last.preview != null -> (if (last.senderId == me.id) "You: " else "") + last.preview
+                        else -> "Media"
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onOpen(p.contact) }
+                            .clickable { onOpen(c) }
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(p.contact, 52.dp)
+                        Avatar(p?.id ?: c.id, name, 52.dp)
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                p.contact.username,
+                                name,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                p.last ?: "Say hello",
-                                color = Ui.muted,
+                                preview,
+                                color = if (c.unread > 0) Ui.ink else Ui.muted,
+                                fontWeight = if (c.unread > 0) FontWeight.Medium else FontWeight.Normal,
                                 fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        p.time?.let {
-                            Spacer(Modifier.width(8.dp))
-                            Text(timeLabel(it), color = Ui.muted, fontSize = 12.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = 12.sp)
+                            if (c.unread > 0) {
+                                Spacer(Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Ui.ink)
+                                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        if (c.unread > 99) "99+" else c.unread.toString(),
+                                        color = Ui.onInk,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -481,7 +483,6 @@ fun ChatListScreen(user: User, onOpen: (Contact) -> Unit, onLogout: () -> Unit) 
 
     if (startDialog) {
         StartChatDialog(
-            user,
             onDismiss = { startDialog = false },
             onStarted = {
                 startDialog = false
