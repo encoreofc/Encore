@@ -85,7 +85,7 @@ object Api {
         .build()
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    private fun call(
+        internal fun call(
         method: String,
         path: String,
         body: JSONObject? = null,
