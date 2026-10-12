@@ -3,6 +3,7 @@ package com.encore.app
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -20,7 +21,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +41,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,8 +73,19 @@ private fun dayLabel(ms: Long): String {
     }
 }
 
-private fun addMsg(list: List<Msg>, m: Msg): List<Msg> =
-    (list.filter { it.id != m.id } + m).sortedBy { it.id }
+private fun addItem(list: List<MsgItem>, x: MsgItem): List<MsgItem> =
+    (list.filter { it.msg.id != x.msg.id } + x).sortedBy { it.msg.id }
+
+private fun setReaction(
+    map: Map<String, List<Pair<String, String>>>,
+    mid: String,
+    uid: String,
+    emoji: String?
+): Map<String, List<Pair<String, String>>> {
+    val rest = (map[mid] ?: emptyList()).filter { it.first != uid }
+    val next = if (emoji == null) rest else rest + (uid to emoji)
+    return if (next.isEmpty()) map - mid else map + (mid to next)
+}
 
 @Composable
 private fun MicIcon(color: Color) {
@@ -165,7 +180,20 @@ private fun TurnIcon(color: Color, forward: Boolean) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Bubble(m: Msg, mine: Boolean, tick: String, onLongPress: () -> Unit) {
+private fun Bubble(
+    item: MsgItem,
+    mine: Boolean,
+    tick: String,
+    reply: ReplyInfo?,
+    replyName: String,
+    reactions: List<Pair<String, String>>,
+    myId: String,
+    onLongPress: () -> Unit,
+    onReact: (String) -> Unit,
+    onQuote: () -> Unit
+) {
+    val m = item.msg
+    val deleted = m.deleted
     val haptic = LocalHapticFeedback.current
     val shape = if (mine) {
         RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
@@ -179,17 +207,20 @@ private fun Bubble(m: Msg, mine: Boolean, tick: String, onLongPress: () -> Unit)
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
         Surface(
-            color = if (mine) Ui.mine else Ui.theirs,
-            contentColor = if (mine) Ui.onMine else Ui.ink,
+            color = if (deleted) Color.Transparent else if (mine) Ui.mine else Ui.theirs,
+            contentColor = if (deleted) Ui.muted else if (mine) Ui.onMine else Ui.ink,
             shape = shape,
+            border = if (deleted) BorderStroke(1.dp, Ui.line) else null,
             modifier = Modifier
                 .widthIn(max = 290.dp)
                 .clip(shape)
                 .combinedClickable(
                     onClick = {},
                     onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onLongPress()
+                        if (!deleted && !m.id.startsWith("local-")) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress()
+                        }
                     }
                 )
         ) {
@@ -197,12 +228,83 @@ private fun Bubble(m: Msg, mine: Boolean, tick: String, onLongPress: () -> Unit)
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.End
             ) {
-                Text(m.body ?: "", fontSize = 16.sp)
+                if (!deleted && item.fwdFrom != null) {
+                    Text(
+                        "Forwarded from ${item.fwdFrom}",
+                        fontSize = 12.sp,
+                        fontStyle = FontStyle.Italic,
+                        color = LocalContentColor.current.copy(alpha = 0.7f),
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                }
+                if (!deleted && item.replyTo != null) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.Start)
+                            .padding(bottom = 4.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onQuote() }
+                            .height(IntrinsicSize.Min)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .fillMaxHeight()
+                                .background(LocalContentColor.current.copy(alpha = 0.6f))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(replyName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (reply == null || reply.deleted) "Message unavailable" else (reply.body ?: ""),
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = LocalContentColor.current.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                }
                 Text(
-                    clock(m.createdAt) + if (mine) "  $tick" else "",
+                    if (deleted) "This message was deleted" else (m.body ?: ""),
+                    fontSize = 16.sp,
+                    fontStyle = if (deleted) FontStyle.Italic else FontStyle.Normal
+                )
+                val meta = (if (item.editedAt != null && !deleted) "edited  " else "") +
+                    clock(m.createdAt) + (if (mine && !deleted) "  $tick" else "")
+                Text(
+                    meta,
                     fontSize = 11.sp,
                     color = LocalContentColor.current.copy(alpha = 0.6f)
                 )
+            }
+        }
+        if (reactions.isNotEmpty() && !deleted) {
+            Row(
+                modifier = Modifier.padding(top = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                reactions.groupBy { it.second }.forEach { (emoji, list) ->
+                    val chosen = list.any { it.first == myId }
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Ui.soft)
+                            .then(
+                                if (chosen) Modifier.border(1.dp, Ui.ink, RoundedCornerShape(12.dp))
+                                else Modifier
+                            )
+                            .clickable { onReact(emoji) }
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(emoji, fontSize = 14.sp)
+                        if (list.size > 1) {
+                            Spacer(Modifier.width(4.dp))
+                            Text("${list.size}", fontSize = 12.sp, color = Ui.muted)
+                        }
+                    }
+                }
             }
         }
     }
@@ -226,12 +328,14 @@ private fun MenuRow(label: String, color: Color, onClick: () -> Unit, icon: @Com
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MessageSheet(
-    message: Msg,
+    item: MsgItem,
     mine: Boolean,
+    myEmoji: String?,
     onReact: (String) -> Unit,
     onCopy: () -> Unit,
     onReply: () -> Unit,
     onForward: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -243,7 +347,7 @@ private fun MessageSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    message.body ?: "",
+                    item.msg.body ?: "",
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(14.dp)
@@ -258,6 +362,7 @@ private fun MessageSheet(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
+                            .background(if (e == myEmoji) Ui.soft else Color.Transparent)
                             .clickable { onReact(e) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -272,6 +377,12 @@ private fun MessageSheet(
             MenuRow("Reply", Ui.ink, onReply) { TurnIcon(Ui.ink, forward = false) }
             HorizontalDivider(color = Ui.line)
             MenuRow("Forward", Ui.ink, onForward) { TurnIcon(Ui.ink, forward = true) }
+            if (mine && item.msg.kind == "text") {
+                HorizontalDivider(color = Ui.line)
+                MenuRow("Edit", Ui.ink, onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = Ui.ink)
+                }
+            }
             if (mine) {
                 HorizontalDivider(color = Ui.line)
                 val red = MaterialTheme.colorScheme.error
@@ -285,10 +396,78 @@ private fun MessageSheet(
 }
 
 @Composable
+private fun ForwardDialog(onPick: (Conv) -> Unit, onDismiss: () -> Unit) {
+    var list by remember { mutableStateOf<List<Conv>?>(null) }
+    LaunchedEffect(Unit) {
+        runIo({ Api.conversations() }) { r -> r.onSuccess { list = it } }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Ui.bg,
+        title = { Text("Forward to") },
+        text = {
+            val l = list
+            if (l == null) {
+                Text("Loading…", color = Ui.muted)
+            } else if (l.isEmpty()) {
+                Text("No chats yet", color = Ui.muted)
+            } else {
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    items(l, key = { it.id }) { c ->
+                        val p = c.peer
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onPick(c) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Avatar(p?.id ?: c.id, p?.displayName ?: "?", 40.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text(p?.displayName ?: "Unknown")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun ComposerBanner(title: String, body: String, onClose: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 4.dp, top = 6.dp)
+            .height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(Ui.ink)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(body, fontSize = 13.sp, color = Ui.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        IconButton(onClick = onClose) {
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Ui.muted)
+        }
+    }
+}
+
+@Composable
 fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () -> Unit) {
     val peer = conv.peer
-    var msgs by remember { mutableStateOf<List<Msg>>(emptyList()) }
-    var pending by remember { mutableStateOf<List<Msg>>(emptyList()) }
+    var items by remember { mutableStateOf<List<MsgItem>>(emptyList()) }
+    var pending by remember { mutableStateOf<List<MsgItem>>(emptyList()) }
+    var reacts by remember { mutableStateOf<Map<String, List<Pair<String, String>>>>(emptyMap()) }
     var text by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf<String?>(null) }
     var peerRead by remember { mutableStateOf(conv.peerRead) }
@@ -297,15 +476,23 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
     var typedAt by remember { mutableStateOf(0L) }
     var online by remember { mutableStateOf<Boolean?>(null) }
     var lastSeen by remember { mutableStateOf(peer?.lastSeen) }
-    var selected by remember { mutableStateOf<Msg?>(null) }
+    var replyTo by remember { mutableStateOf<MsgItem?>(null) }
+    var editing by remember { mutableStateOf<MsgItem?>(null) }
+    var selected by remember { mutableStateOf<MsgItem?>(null) }
+    var confirmDelete by remember { mutableStateOf<MsgItem?>(null) }
+    var forwarding by remember { mutableStateOf<MsgItem?>(null) }
+    var jumpTo by remember { mutableStateOf<String?>(null) }
     val soon = remember { SoonState() }
     val listState = rememberLazyListState()
     val clipboard = LocalClipboardManager.current
     val ctx = LocalContext.current
 
     fun load() {
-        runIo({ Api.messages(conv.id) }) { r ->
-            r.onSuccess { list -> msgs = list }.onFailure {
+        runIo({ Features.sync(conv.id) }) { r ->
+            r.onSuccess { s ->
+                items = s.items
+                reacts = s.reactions
+            }.onFailure {
                 if ((it as? ApiException)?.code == "unauthorized") onLogout()
             }
         }
@@ -314,17 +501,58 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
     fun send() {
         val body = text.trim()
         if (body.isEmpty()) return
+        val ed = editing
+        if (ed != null) {
+            editing = null
+            text = ""
+            runIo({ Features.edit(ed.msg.id, body) }) { r ->
+                r.onSuccess {
+                    items = items.map { x ->
+                        if (x.msg.id == ed.msg.id) x.copy(msg = x.msg.copy(body = body), editedAt = System.currentTimeMillis()) else x
+                    }
+                }.onFailure { problem = it.message }
+            }
+            return
+        }
+        val rep = replyTo
         val cid = java.util.UUID.randomUUID().toString()
-        pending = pending + Msg("local-$cid", conv.id, me.id, "text", body, System.currentTimeMillis(), false, cid)
+        val local = MsgItem(
+            Msg("local-$cid", conv.id, me.id, "text", body, System.currentTimeMillis(), false, cid),
+            null, null, rep?.msg?.id, null
+        )
+        pending = pending + local
         text = ""
+        replyTo = null
         typedAt = 0L
         Rt.send(JSONObject().put("type", "typing").put("c", conv.id).put("s", false))
-        runIo({ Api.send(conv.id, body, cid) }) { r ->
-            pending = pending.filter { it.clientId != cid }
-            r.onSuccess { m -> msgs = addMsg(msgs, m) }.onFailure {
+        runIo({ Features.send(conv.id, body, cid, rep?.msg?.id) }) { r ->
+            pending = pending.filter { it.msg.clientId != cid }
+            r.onSuccess { m -> items = addItem(items, m) }.onFailure {
                 problem = it.message
                 if (text.isBlank()) text = body
             }
+        }
+    }
+
+    fun react(id: String, emoji: String) {
+        val mine = reacts[id]?.firstOrNull { it.first == me.id }?.second
+        reacts = setReaction(reacts, id, me.id, if (mine == emoji) null else emoji)
+        runIo({ Features.react(id, emoji) }) { r ->
+            r.onFailure {
+                problem = it.message
+                load()
+            }
+        }
+    }
+
+    fun delete(x: MsgItem) {
+        runIo({ Features.delete(x.msg.id) }) { r ->
+            r.onSuccess {
+                items = items.map { y ->
+                    if (y.msg.id == x.msg.id) y.copy(msg = y.msg.copy(deleted = true, body = null)) else y
+                }
+                reacts = reacts - x.msg.id
+            }.onFailure { problem = it.message }
         }
     }
 
@@ -344,11 +572,11 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
         when (j.optString("type")) {
             "hello" -> load()
             "message" -> {
-                val m = Api.parseMsg(j.getJSONObject("message"))
-                if (m.conversationId == conv.id) {
-                    pending = pending.filter { it.clientId != m.clientId }
-                    msgs = addMsg(msgs, m)
-                    if (m.senderId != me.id) typingAt = 0L
+                val x = parseItem(j.getJSONObject("message"))
+                if (x.msg.conversationId == conv.id) {
+                    pending = pending.filter { it.msg.clientId != x.msg.clientId }
+                    items = addItem(items, x)
+                    if (x.msg.senderId != me.id) typingAt = 0L
                 }
             }
             "read" -> {
@@ -358,8 +586,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
             "typing" -> {
                 if (j.optString("c") == conv.id && j.optString("u") != me.id) {
                     if (j.optBoolean("s", true)) {
-                        val now = System.currentTimeMillis()
-                        typingAt = now
+                        typingAt = System.currentTimeMillis()
                         convHandler.postDelayed({
                             if (System.currentTimeMillis() - typingAt >= 5000L) typingAt = 0L
                         }, 5100L)
@@ -368,11 +595,36 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                     }
                 }
             }
+            "reaction" -> {
+                if (j.optString("c") == conv.id) {
+                    val e = if (j.isNull("e")) null else j.optString("e")
+                    reacts = setReaction(reacts, j.optString("m"), j.optString("u"), e)
+                }
+            }
+            "delete" -> {
+                if (j.optString("c") == conv.id) {
+                    val id = j.optString("id")
+                    items = items.map { y ->
+                        if (y.msg.id == id) y.copy(msg = y.msg.copy(deleted = true, body = null)) else y
+                    }
+                    reacts = reacts - id
+                }
+            }
+            "edit" -> {
+                if (j.optString("c") == conv.id) {
+                    val id = j.optString("id")
+                    val body = j.optString("body")
+                    val at = j.optLong("edited_at", 0L)
+                    items = items.map { y ->
+                        if (y.msg.id == id) y.copy(msg = y.msg.copy(body = body), editedAt = at) else y
+                    }
+                }
+            }
             else -> {}
         }
     }
 
-    val lastMsg = msgs.lastOrNull()
+    val lastMsg = items.lastOrNull()?.msg
     LaunchedEffect(lastMsg?.id) {
         val l = lastMsg
         if (l != null && l.senderId != me.id && l.id > marked) {
@@ -381,23 +633,32 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
         }
     }
 
-    val shown = msgs + pending
-    val rows = remember(msgs, pending) {
+    val byId = remember(items) { items.associateBy { it.msg.id } }
+    val rows = remember(items, pending) {
         val out = ArrayList<Any>()
         var lastDay = ""
-        for (m in msgs + pending) {
-            val d = dayLabel(m.createdAt)
+        for (x in items + pending) {
+            val d = dayLabel(x.msg.createdAt)
             if (d != lastDay) {
                 out.add(d)
                 lastDay = d
             }
-            out.add(m)
+            out.add(x)
         }
         out
     }
 
     LaunchedEffect(rows.size) {
         if (rows.isNotEmpty()) listState.scrollToItem(rows.size - 1)
+    }
+
+    LaunchedEffect(jumpTo) {
+        val id = jumpTo
+        if (id != null) {
+            val idx = rows.indexOfFirst { it is MsgItem && it.msg.id == id }
+            if (idx >= 0) listState.animateScrollToItem(idx)
+            jumpTo = null
+        }
     }
 
     val subtitle = when {
@@ -459,7 +720,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                items(rows, key = { if (it is Msg) it.id else it }) { row ->
+                items(rows, key = { if (it is MsgItem) it.msg.id else it }) { row ->
                     if (row is String) {
                         Box(
                             modifier = Modifier
@@ -469,12 +730,29 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                         ) {
                             Text(row, fontSize = 12.sp, color = Ui.muted)
                         }
-                    } else if (row is Msg) {
-                        val mine = row.senderId == me.id
-                        val local = row.id.startsWith("local-")
-                        val seen = mine && !local && peerRead.isNotEmpty() && row.id <= peerRead
+                    } else if (row is MsgItem) {
+                        val m = row.msg
+                        val mine = m.senderId == me.id
+                        val local = m.id.startsWith("local-")
+                        val seen = mine && !local && peerRead.isNotEmpty() && m.id <= peerRead
                         val tick = if (!mine) "" else if (local) "…" else if (seen) "✓✓" else "✓"
-                        Bubble(row, mine, tick, onLongPress = { selected = row })
+                        val rid = row.replyTo
+                        val reply = row.reply ?: rid?.let { id ->
+                            byId[id]?.let { t -> ReplyInfo(id, t.msg.senderId, t.msg.body, t.msg.deleted) }
+                        }
+                        val replyName = if (reply?.senderId == me.id) "You" else (peer?.displayName ?: "Unknown")
+                        Bubble(
+                            item = row,
+                            mine = mine,
+                            tick = tick,
+                            reply = reply,
+                            replyName = replyName,
+                            reactions = reacts[m.id] ?: emptyList(),
+                            myId = me.id,
+                            onLongPress = { selected = row },
+                            onReact = { e -> react(m.id, e) },
+                            onQuote = { if (rid != null) jumpTo = rid }
+                        )
                     }
                 }
             }
@@ -485,6 +763,20 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+            }
+
+            val ed = editing
+            val rp = replyTo
+            if (ed != null) {
+                ComposerBanner("Editing message", ed.msg.body ?: "") {
+                    editing = null
+                    text = ""
+                }
+            } else if (rp != null) {
+                ComposerBanner(
+                    "Reply to " + (if (rp.msg.senderId == me.id) "yourself" else (peer?.displayName ?: "message")),
+                    rp.msg.body ?: ""
+                ) { replyTo = null }
             }
 
             Row(
@@ -502,7 +794,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                         text = it
                         problem = null
                         val now = System.currentTimeMillis()
-                        if (it.isNotBlank() && now - typedAt > 3000L) {
+                        if (editing == null && it.isNotBlank() && now - typedAt > 3000L) {
                             typedAt = now
                             Rt.send(JSONObject().put("type", "typing").put("c", conv.id).put("s", true))
                         }
@@ -545,32 +837,70 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
         SoonToast(soon, 80.dp)
     }
 
-    selected?.let { m ->
+    selected?.let { x ->
         MessageSheet(
-            message = m,
-            mine = m.senderId == me.id,
-            onReact = {
+            item = x,
+            mine = x.msg.senderId == me.id,
+            myEmoji = reacts[x.msg.id]?.firstOrNull { it.first == me.id }?.second,
+            onReact = { e ->
                 selected = null
-                soon.show("Reactions")
+                react(x.msg.id, e)
             },
             onCopy = {
-                clipboard.setText(AnnotatedString(m.body ?: ""))
+                clipboard.setText(AnnotatedString(x.msg.body ?: ""))
                 Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
                 selected = null
             },
             onReply = {
                 selected = null
-                soon.show("Reply")
+                editing = null
+                replyTo = x
             },
             onForward = {
                 selected = null
-                soon.show("Forward")
+                forwarding = x
+            },
+            onEdit = {
+                selected = null
+                replyTo = null
+                editing = x
+                text = x.msg.body ?: ""
             },
             onDelete = {
                 selected = null
-                soon.show("Delete")
+                confirmDelete = x
             },
             onDismiss = { selected = null }
+        )
+    }
+
+    confirmDelete?.let { x ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            containerColor = Ui.bg,
+            title = { Text("Delete message?") },
+            text = { Text("This removes it for both of you.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = null
+                    delete(x)
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } }
+        )
+    }
+
+    forwarding?.let { x ->
+        ForwardDialog(
+            onPick = { c ->
+                forwarding = null
+                runIo({ Features.forward(x.msg.id, c.id) }) { r ->
+                    r.onSuccess {
+                        Toast.makeText(ctx, "Forwarded", Toast.LENGTH_SHORT).show()
+                    }.onFailure { problem = it.message }
+                }
+            },
+            onDismiss = { forwarding = null }
         )
     }
 }
