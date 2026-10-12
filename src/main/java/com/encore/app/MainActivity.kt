@@ -1,9 +1,6 @@
 package com.encore.app
 
-import android.content.Context
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -27,42 +24,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-
-private val mainHandler = Handler(Looper.getMainLooper())
-
-private fun <T> background(work: () -> T, done: (Result<T>) -> Unit) {
-    Thread {
-        val result = runCatching(work)
-        mainHandler.post { done(result) }
-    }.start()
-}
+import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         edgeToEdgeLight()
-        val prefs = getSharedPreferences("encore", Context.MODE_PRIVATE)
+        Session.load(this)
         setContent {
             EncoreTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    var user by remember {
-                        mutableStateOf<User?>(
-                            if (prefs.contains("uid")) {
-                                User(prefs.getLong("uid", 0L), prefs.getString("uname", "") ?: "")
-                            } else null
-                        )
-                    }
+                    var user by remember { mutableStateOf(Session.user) }
+                    val ctx = LocalContext.current
                     val current = user
                     if (current == null) {
-                        AuthScreen { u ->
-                            prefs.edit().putLong("uid", u.id).putString("uname", u.username).apply()
+                        AuthScreen { token, u ->
+                            Session.save(ctx, token, u)
                             user = u
                         }
                     } else {
                         ChatApp(current) {
-                            prefs.edit().clear().apply()
+                            val t = Session.token
+                            if (t != null) runIo({ runCatching { Api.logout(t) } }) { }
+                            Session.clear(ctx)
                             user = null
                         }
                     }
@@ -73,7 +60,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AuthScreen(onDone: (User) -> Unit) {
+private fun AuthScreen(onDone: (String, User) -> Unit) {
     var creating by remember { mutableStateOf(false) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -83,13 +70,13 @@ private fun AuthScreen(onDone: (User) -> Unit) {
     fun submit() {
         busy = true
         error = null
-        background({
-            if (creating) Db.signUp(username, password) else Db.login(username, password)
-        }) { r ->
+        val path = if (creating) "/v1/auth/register" else "/v1/auth/login"
+        val u = username
+        val p = password
+        runIo({ Api.auth(path, u, p) }) { r ->
             busy = false
-            r.onSuccess { onDone(it) }.onFailure {
-                error = if (it is DbException) it.message
-                else "Can't reach the server. Check your connection."
+            r.onSuccess { onDone(it.first, it.second) }.onFailure {
+                error = if (it is ApiException) it.message else "Something went wrong"
             }
         }
     }
@@ -102,7 +89,7 @@ private fun AuthScreen(onDone: (User) -> Unit) {
             .padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Encore", style = MaterialTheme.typography.headlineMedium)
+        Text("Encore", fontSize = 32.sp, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(32.dp))
         OutlinedTextField(
             value = username,
@@ -120,6 +107,10 @@ private fun AuthScreen(onDone: (User) -> Unit) {
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth()
         )
+        if (creating) {
+            Spacer(Modifier.height(6.dp))
+            Text("At least 8 characters", fontSize = 12.sp, color = Ui.muted)
+        }
         error?.let {
             Spacer(Modifier.height(12.dp))
             Text(it, color = MaterialTheme.colorScheme.error)
