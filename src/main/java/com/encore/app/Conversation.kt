@@ -1,8 +1,12 @@
 package com.encore.app
 
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -51,6 +55,14 @@ import org.json.JSONObject
 
 private val EMOJIS = listOf("🔥", "🙌", "😭", "🙈", "🙏", "😖", "❤️", "👍", "😂", "😮")
 private val convHandler = Handler(Looper.getMainLooper())
+
+private fun kindLabel(k: String?): String = when (k) {
+    "image" -> "Photo"
+    "video" -> "Video"
+    "voice" -> "Voice message"
+    "file" -> "File"
+    else -> "Message"
+}
 
 private fun clock(ms: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
@@ -182,6 +194,7 @@ private fun TurnIcon(color: Color, forward: Boolean) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Bubble(
+    cid: String,
     item: MsgItem,
     mine: Boolean,
     tick: String,
@@ -189,12 +202,16 @@ private fun Bubble(
     replyName: String,
     reactions: List<Pair<String, String>>,
     myId: String,
+    progress: Float?,
     onLongPress: () -> Unit,
     onReact: (String) -> Unit,
-    onQuote: () -> Unit
+    onQuote: () -> Unit,
+    onImage: () -> Unit,
+    onFile: () -> Unit
 ) {
     val m = item.msg
     val deleted = m.deleted
+    val hasMedia = !deleted && item.media != null && (m.kind == "image" || m.kind == "file")
     val haptic = LocalHapticFeedback.current
     val shape = if (mine) {
         RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
@@ -257,7 +274,8 @@ private fun Bubble(
                         Column {
                             Text(replyName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(
-                                if (reply == null || reply.deleted) "Message unavailable" else (reply.body ?: ""),
+                                if (reply == null || reply.deleted) "Message unavailable"
+                                else (reply.body ?: kindLabel(reply.kind)),
                                 fontSize = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -266,11 +284,21 @@ private fun Bubble(
                         }
                     }
                 }
-                Text(
-                    if (deleted) "This message was deleted" else (m.body ?: ""),
-                    fontSize = 16.sp,
-                    fontStyle = if (deleted) FontStyle.Italic else FontStyle.Normal
-                )
+                if (hasMedia) {
+                    Box(modifier = Modifier.align(Alignment.Start)) {
+                        MediaBlock(cid, item, progress, onImage, onFile)
+                    }
+                    if (!m.body.isNullOrBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(m.body, fontSize = 16.sp, modifier = Modifier.align(Alignment.Start))
+                    }
+                } else {
+                    Text(
+                        if (deleted) "This message was deleted" else (m.body ?: kindLabel(m.kind)),
+                        fontSize = 16.sp,
+                        fontStyle = if (deleted) FontStyle.Italic else FontStyle.Normal
+                    )
+                }
                 val meta = (if (item.editedAt != null && !deleted) "edited  " else "") +
                     clock(m.createdAt) + (if (mine && !deleted) "  $tick" else "")
                 Text(
@@ -348,7 +376,7 @@ private fun MessageSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    item.msg.body ?: "",
+                    item.msg.body ?: kindLabel(item.msg.kind),
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(14.dp)
@@ -373,8 +401,10 @@ private fun MessageSheet(
             }
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = Ui.line)
-            MenuRow("Copy", Ui.ink, onCopy) { CopyIcon(Ui.ink) }
-            HorizontalDivider(color = Ui.line)
+            if (!item.msg.body.isNullOrBlank()) {
+                MenuRow("Copy", Ui.ink, onCopy) { CopyIcon(Ui.ink) }
+                HorizontalDivider(color = Ui.line)
+            }
             MenuRow("Reply", Ui.ink, onReply) { TurnIcon(Ui.ink, forward = false) }
             HorizontalDivider(color = Ui.line)
             MenuRow("Forward", Ui.ink, onForward) { TurnIcon(Ui.ink, forward = true) }
@@ -468,6 +498,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
     val peer = conv.peer
     var items by remember { mutableStateOf<List<MsgItem>>(emptyList()) }
     var pending by remember { mutableStateOf<List<MsgItem>>(emptyList()) }
+    var progress by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var reacts by remember { mutableStateOf<Map<String, List<Pair<String, String>>>>(emptyMap()) }
     var text by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -482,6 +513,8 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
     var selected by remember { mutableStateOf<MsgItem?>(null) }
     var confirmDelete by remember { mutableStateOf<MsgItem?>(null) }
     var forwarding by remember { mutableStateOf<MsgItem?>(null) }
+    var viewer by remember { mutableStateOf<MsgItem?>(null) }
+    var attach by remember { mutableStateOf(false) }
     var jumpTo by remember { mutableStateOf<String?>(null) }
     val soon = remember { SoonState() }
     val listState = rememberLazyListState()
@@ -533,6 +566,41 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                 if (text.isBlank()) text = body
             }
         }
+    }
+
+    fun sendMedia(uri: Uri, wanted: String) {
+        val picked = try {
+            Uploads.inspect(ctx, uri, wanted)
+        } catch (e: Exception) {
+            problem = e.message ?: "Can't read this file"
+            return
+        }
+        val cid = java.util.UUID.randomUUID().toString()
+        val lid = "local-$cid"
+        val rep = replyTo
+        val local = MsgItem(
+            Msg(lid, conv.id, me.id, picked.kind, null, System.currentTimeMillis(), false, cid),
+            null, null, rep?.msg?.id, null,
+            Media(picked.name, picked.size, picked.type, picked.w, picked.h, 0L, uri.toString())
+        )
+        pending = pending + local
+        progress = progress + (lid to 0f)
+        replyTo = null
+        problem = null
+        runIo({
+            Uploads.upload(ctx, conv.id, picked, cid, rep?.msg?.id) { p -> progress = progress + (lid to p) }
+        }) { r ->
+            pending = pending.filter { it.msg.clientId != cid }
+            progress = progress - lid
+            r.onSuccess { m -> items = addItem(items, m) }.onFailure { problem = it.message }
+        }
+    }
+
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) sendMedia(uri, "image")
+    }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) sendMedia(uri, "file")
     }
 
     fun react(id: String, emoji: String) {
@@ -739,10 +807,11 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                         val tick = if (!mine) "" else if (local) "…" else if (seen) "✓✓" else "✓"
                         val rid = row.replyTo
                         val reply = row.reply ?: rid?.let { id ->
-                            byId[id]?.let { t -> ReplyInfo(id, t.msg.senderId, t.msg.body, t.msg.deleted) }
+                            byId[id]?.let { t -> ReplyInfo(id, t.msg.senderId, t.msg.body, t.msg.deleted, t.msg.kind) }
                         }
                         val replyName = if (reply?.senderId == me.id) "You" else (peer?.displayName ?: "Unknown")
                         Bubble(
+                            cid = conv.id,
                             item = row,
                             mine = mine,
                             tick = tick,
@@ -750,9 +819,12 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                             replyName = replyName,
                             reactions = reacts[m.id] ?: emptyList(),
                             myId = me.id,
+                            progress = progress[m.id],
                             onLongPress = { selected = row },
                             onReact = { e -> react(m.id, e) },
-                            onQuote = { if (rid != null) jumpTo = rid }
+                            onQuote = { if (rid != null) jumpTo = rid },
+                            onImage = { viewer = row },
+                            onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } }
                         )
                     }
                 }
@@ -776,7 +848,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
             } else if (rp != null) {
                 ComposerBanner(
                     "Reply to " + (if (rp.msg.senderId == me.id) "yourself" else (peer?.displayName ?: "message")),
-                    rp.msg.body ?: ""
+                    rp.msg.body ?: kindLabel(rp.msg.kind)
                 ) { replyTo = null }
             }
 
@@ -786,7 +858,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                     .padding(horizontal = 6.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { soon.show("Attachments") }) {
+                IconButton(onClick = { attach = true }) {
                     Icon(Icons.Default.Add, contentDescription = "Attach", tint = Ui.ink)
                 }
                 TextField(
@@ -873,6 +945,28 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
             },
             onDismiss = { selected = null }
         )
+    }
+
+    if (attach) {
+        AttachSheet(
+            onPhoto = {
+                attach = false
+                pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+            onFile = {
+                attach = false
+                pickFile.launch(arrayOf("*/*"))
+            },
+            onSoon = {
+                attach = false
+                soon.show(it)
+            },
+            onDismiss = { attach = false }
+        )
+    }
+
+    viewer?.let { v ->
+        ImageViewer(conv.id, v, onClose = { viewer = null })
     }
 
     confirmDelete?.let { x ->
