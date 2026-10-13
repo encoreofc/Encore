@@ -26,6 +26,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -41,30 +44,60 @@ import coil.request.ImageRequest
 private fun GalleryGlyph(color: Color) {
     Canvas(Modifier.size(24.dp)) {
         val w = size.width
+        val sw = w * 0.08f
+        // outer rounded frame
         drawRoundRect(
             color,
-            topLeft = Offset(w * 0.1f, w * 0.18f),
-            size = Size(w * 0.8f, w * 0.64f),
-            cornerRadius = CornerRadius(w * 0.1f),
-            style = Stroke(width = w * 0.08f)
+            topLeft = Offset(w * 0.1f, w * 0.14f),
+            size = Size(w * 0.8f, w * 0.72f),
+            cornerRadius = CornerRadius(w * 0.12f),
+            style = Stroke(width = sw)
         )
-        drawCircle(color, radius = w * 0.07f, center = Offset(w * 0.34f, w * 0.38f))
+        // sun
+        drawCircle(color, radius = w * 0.07f, center = Offset(w * 0.34f, w * 0.36f))
+        // mountains
+        val mountain = Path().apply {
+            moveTo(w * 0.12f, w * 0.72f)
+            lineTo(w * 0.36f, w * 0.54f)
+            lineTo(w * 0.54f, w * 0.68f)
+            lineTo(w * 0.68f, w * 0.56f)
+            lineTo(w * 0.88f, w * 0.72f)
+        }
+        drawPath(
+            mountain,
+            color,
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
     }
 }
 
 @Composable
-private fun Pill(label: String, dark: Boolean, onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun Pill(
+    label: String,
+    dark: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: @Composable () -> Unit
+) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(20.dp))
             .background(if (dark) Ui.ink else Ui.soft)
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         icon()
         Spacer(Modifier.width(6.dp))
-        Text(label, color = if (dark) Ui.onInk else Ui.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(
+            label,
+            color = if (dark) Ui.onInk else Ui.ink,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }
 
@@ -228,12 +261,15 @@ fun UserPageScreen(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill("Audio", true, { soon.show("Calls") }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Pill("Audio", true, { soon.show("Calls") }, Modifier.weight(1f)) {
                         Icon(Icons.Default.Call, contentDescription = null, tint = Ui.onInk, modifier = Modifier.size(18.dp))
                     }
-                    Pill("Video", true, { soon.show("Video calls") }) { VideoIcon(Ui.onInk) }
-                    Pill("Search", false, onSearch) {
+                    Pill("Video", true, { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.onInk) }
+                    Pill("Search", false, onSearch, Modifier.weight(1f)) {
                         Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(18.dp))
                     }
                 }
