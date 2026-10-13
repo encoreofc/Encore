@@ -4,7 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 
 sealed interface Route {
-    data class Chat(val conv: Conv) : Route
+    data class Chat(val conv: Conv, val jump: String? = null) : Route
     data object MyProfile : Route
     data class UserInfo(val conv: Conv) : Route
     data object NewGroup : Route
@@ -12,6 +12,10 @@ sealed interface Route {
     data object Search : Route
     data object Settings : Route
     data object Sessions : Route
+    data class StoryViewer(val groups: List<StoryGroup>, val gi: Int, val si: Int) : Route
+    data object StoryCreate : Route
+    data class ChatSearch(val conv: Conv) : Route
+    data class Gallery(val conv: Conv) : Route
 }
 
 @Composable
@@ -38,10 +42,12 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
             onProfile = { stack.add(Route.MyProfile) },
             onNewGroup = { stack.add(Route.NewGroup) },
             onSearch = { stack.add(Route.Search) },
-            onSettings = { stack.add(Route.Settings) }
+            onSettings = { stack.add(Route.Settings) },
+            onStories = { g, gi, si -> stack.add(Route.StoryViewer(g, gi, si)) },
+            onAddStory = { stack.add(Route.StoryCreate) }
         )
         is Route.Chat -> ConversationScreen(
-            me, top.conv,
+            me, top.conv, top.jump,
             onBack = { back() },
             onLogout = onLogout,
             onInfo = {
@@ -49,7 +55,13 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
             }
         )
         Route.MyProfile -> ProfileScreen(me, onBack = { back() }, onLogout = onLogout)
-        is Route.UserInfo -> UserInfoScreen(top.conv, onBack = { back() })
+        is Route.UserInfo -> UserPageScreen(
+            me, top.conv,
+            onBack = { back() },
+            onStories = { g, gi, si -> stack.add(Route.StoryViewer(g, gi, si)) },
+            onSearch = { stack.add(Route.ChatSearch(top.conv)) },
+            onMedia = { stack.add(Route.Gallery(top.conv)) }
+        )
         Route.NewGroup -> CreateGroupScreen(
             onBack = { back() },
             onCreated = { c ->
@@ -81,5 +93,16 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
             onLogout = onLogout
         )
         Route.Sessions -> SessionsScreen(onBack = { back() }, onLogout = onLogout)
+        is Route.StoryViewer -> StoryViewerScreen(me, top.groups, top.gi, top.si, onClose = { back() })
+        Route.StoryCreate -> StoryCreateScreen(onBack = { back() }, onPosted = { back() })
+        is Route.ChatSearch -> ChatSearchScreen(
+            top.conv,
+            onBack = { back() },
+            onJump = { id ->
+                repeat(3) { back() }
+                stack.add(Route.Chat(top.conv, id))
+            }
+        )
+        is Route.Gallery -> GalleryScreen(top.conv, onBack = { back() })
     }
 }
