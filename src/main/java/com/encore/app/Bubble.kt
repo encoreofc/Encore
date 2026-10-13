@@ -44,6 +44,7 @@ internal fun Bubble(
 ) {
     val m = item.msg
     val deleted = m.deleted
+    val isVoice = !deleted && item.media != null && m.kind == "voice"
     val hasMedia = !deleted && item.media != null && (m.kind == "image" || m.kind == "file")
     val haptic = LocalHapticFeedback.current
     val shape = if (mine) {
@@ -117,7 +118,11 @@ internal fun Bubble(
                         }
                     }
                 }
-                if (hasMedia) {
+                if (isVoice) {
+                    Box(modifier = Modifier.align(Alignment.Start)) {
+                        VoiceRow(cid, item, progress)
+                    }
+                } else if (hasMedia) {
                     Box(modifier = Modifier.align(Alignment.Start)) {
                         MediaBlock(cid, item, progress, onImage, onFile)
                     }
