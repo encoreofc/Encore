@@ -68,7 +68,11 @@ private fun ConversationHeader(
 }
 
 @Composable
-private fun Composer(st: ConversationState, soon: SoonState, onAttach: () -> Unit) {
+private fun Composer(st: ConversationState, voice: VoiceController, soon: SoonState, onAttach: () -> Unit) {
+    if (voice.recording) {
+        RecordingBar(voice)
+        return
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -94,7 +98,7 @@ private fun Composer(st: ConversationState, soon: SoonState, onAttach: () -> Uni
             modifier = Modifier.weight(1f)
         )
         if (st.text.isBlank()) {
-            IconButton(onClick = { soon.show("Voice messages") }) { MicIcon(Ui.ink) }
+            IconButton(onClick = { voice.onMicClick() }) { MicIcon(Ui.ink) }
         } else {
             IconButton(onClick = { st.send() }) {
                 Box(
@@ -120,6 +124,7 @@ private fun Composer(st: ConversationState, soon: SoonState, onAttach: () -> Uni
 fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val st = remember(conv.id) { ConversationState(me, conv, ctx.applicationContext, onLogout) }
+    val voice = rememberVoice(st)
     val peer = conv.peer
     var selected by remember { mutableStateOf<MsgItem?>(null) }
     var confirmDelete by remember { mutableStateOf<MsgItem?>(null) }
@@ -252,7 +257,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                 ) { st.replyTo = null }
             }
 
-            Composer(st, soon) { attach = true }
+            Composer(st, voice, soon) { attach = true }
         }
 
         SoonToast(soon, 80.dp)
