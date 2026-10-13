@@ -20,17 +20,9 @@ jobs:
         with:
           gradle-version: 8.9
 
-      - name: Decode keystore
-        env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-        run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/encore.jks"
-          fi
-
       - name: Build release APK
         env:
-          KEYSTORE_PATH: ${{ runner.temp }}/encore.jks
+          KEYSTORE_PATH: ${{ github.workspace }}/encore.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           set -o pipefail
