@@ -11,7 +11,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import org.json.JSONObject
 
@@ -27,10 +27,7 @@ object GoogleSignIn {
     }
 
     fun getIdToken(activityCtx: Context, clientId: String, done: (Result<String>) -> Unit) {
-        val option = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(clientId)
-            .build()
+        val option = GetSignInWithGoogleOption.Builder(clientId).build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
         CredentialManager.create(activityCtx).getCredentialAsync(
             activityCtx,
