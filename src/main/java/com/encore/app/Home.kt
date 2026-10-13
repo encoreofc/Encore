@@ -1,7 +1,6 @@
 package com.encore.app
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -14,9 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,7 +27,9 @@ fun ChatListScreen(
     onProfile: () -> Unit,
     onNewGroup: () -> Unit,
     onSearch: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onStories: (List<StoryGroup>, Int, Int) -> Unit,
+    onAddStory: () -> Unit
 ) {
     var chats by remember { mutableStateOf<List<Conv>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
@@ -39,7 +37,6 @@ fun ChatListScreen(
     var startDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val soon = remember { SoonState() }
-    val dash = Ui.muted.copy(alpha = 0.7f)
 
     fun refresh() {
         runIo({ Api.conversations() }) { r ->
@@ -84,66 +81,7 @@ fun ChatListScreen(
                 }
             }
 
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                item {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable { soon.show("Stories") }
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .drawBehind {
-                                    drawCircle(
-                                        color = dash,
-                                        style = Stroke(
-                                            width = 1.5.dp.toPx(),
-                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f))
-                                        )
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = Ui.muted)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text("Add story", fontSize = 12.sp, color = Ui.muted)
-                    }
-                }
-                items(chats.filter { it.type == "dm" && it.peer != null }.take(10), key = { it.id }) { c ->
-                    val p = c.peer!!
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable { soon.show("Stories") }
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .border(2.dp, Ui.ink, CircleShape)
-                                .padding(4.dp)
-                        ) {
-                            Avatar(p.id, p.displayName, 56.dp)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            p.displayName,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 64.dp)
-                        )
-                    }
-                }
-            }
+            StoriesRow(me, onStories, onAddStory)
 
             Row(
                 modifier = Modifier
