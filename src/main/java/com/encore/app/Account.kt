@@ -8,12 +8,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 
 data class SessionInfo(val id: String, val device: String?, val createdAt: Long, val current: Boolean)
+
+private data class Acct(val hasPassword: Boolean, val googleEmail: String?)
+
+private fun fetchAcct(): Acct {
+    val u = Api.call("GET", "/v1/me").getJSONObject("user")
+    return Acct(u.optBoolean("has_password", true), if (u.isNull("google_email")) null else u.getString("google_email"))
+}
 
 private fun fetchSessions(): List<SessionInfo> {
     val arr = Api.call("GET", "/v1/sessions").getJSONArray("sessions")
@@ -32,9 +40,76 @@ private fun dateTime(ms: Long): String =
     java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
 
 @Composable
+private fun PasswordSetDialog(hasPassword: Boolean, onDismiss: () -> Unit, onDone: () -> Unit) {
+    var old by remember { mutableStateOf("") }
+    var new by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+
+    fun go() {
+        busy = true
+        problem = null
+        val o = old
+        val n = new
+        runIo({
+            val b = JSONObject().put("new_password", n)
+            if (hasPassword) b.put("old_password", o)
+            Api.call("POST", "/v1/auth/password", b)
+        }) { r ->
+            busy = false
+            r.onSuccess { onDone() }.onFailure { problem = it.message }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Ui.bg,
+        title = { Text(if (hasPassword) "Change password" else "Set a password") },
+        text = {
+            Column {
+                if (hasPassword) {
+                    OutlinedTextField(
+                        value = old,
+                        onValueChange = { old = it },
+                        label = { Text("Current password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                OutlinedTextField(
+                    value = new,
+                    onValueChange = { new = it },
+                    label = { Text("New password (8+ characters)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                problem?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { go() },
+                enabled = !busy && new.length >= 8 && (!hasPassword || old.isNotEmpty())
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
 fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> Unit) {
+    val ctx = LocalContext.current
     var theme by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
+    var pw by remember { mutableStateOf(false) }
+    var unlink by remember { mutableStateOf(false) }
+    var acct by remember { mutableStateOf<Acct?>(null) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     val soon = remember { SoonState() }
     val mode = when (ThemeStore.mode) {
         "light" -> "Light"
@@ -42,6 +117,45 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
         else -> "System default"
     }
 
+    fun load() {
+        runIo({ fetchAcct() }) { r ->
+            r.onSuccess { acct = it }.onFailure {
+                if ((it as? ApiException)?.code == "unauthorized") onLogout()
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    fun linkGoogle() {
+        busy = true
+        msg = null
+        runIo({ GoogleSignIn.clientId() }) { r ->
+            r.onSuccess { cid ->
+                if (cid == null) {
+                    busy = false
+                    msg = "Google sign-in isn't set up yet"
+                    return@onSuccess
+                }
+                GoogleSignIn.getIdToken(ctx, cid) { res ->
+                    res.onSuccess { tok ->
+                        runIo({ GoogleSignIn.link(tok) }) { r2 ->
+                            busy = false
+                            r2.onSuccess { load() }.onFailure { msg = it.message }
+                        }
+                    }.onFailure {
+                        busy = false
+                        if ((it as? ApiException)?.code != "cancelled") msg = it.message
+                    }
+                }
+            }.onFailure {
+                busy = false
+                msg = it.message
+            }
+        }
+    }
+
+    val a = acct
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -62,6 +176,22 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
             ) {
                 SettingRow("Theme", sub = mode, onClick = { theme = true })
                 HorizontalDivider(color = Ui.line)
+                SettingRow(
+                    "Google account",
+                    sub = if (a == null) "…" else (a.googleEmail ?: "Not linked. Tap to link"),
+                    onClick = {
+                        if (!busy && a != null) {
+                            if (a.googleEmail != null) unlink = true else linkGoogle()
+                        }
+                    }
+                )
+                HorizontalDivider(color = Ui.line)
+                SettingRow(
+                    if (a != null && !a.hasPassword) "Set a password" else "Change password",
+                    sub = if (a != null && !a.hasPassword) "You signed up with Google" else null,
+                    onClick = { if (a != null) pw = true }
+                )
+                HorizontalDivider(color = Ui.line)
                 SettingRow("Active devices", sub = "See where you are logged in", onClick = onSessions)
                 HorizontalDivider(color = Ui.line)
                 SettingRow("Notifications", sub = "Sounds and alerts", onClick = { soon.show("Notifications") })
@@ -73,6 +203,10 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
                 SettingRow("Delete account", color = MaterialTheme.colorScheme.error, onClick = { delete = true })
                 HorizontalDivider(color = Ui.line)
                 SettingRow("Log out", color = MaterialTheme.colorScheme.error, onClick = onLogout)
+                msg?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
                 Spacer(Modifier.height(24.dp))
             }
         }
@@ -81,6 +215,34 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
 
     if (theme) ThemeDialog(onDismiss = { theme = false })
     if (delete) DeleteAccountDialog(onDismiss = { delete = false }, onDeleted = onLogout)
+    if (pw && a != null) {
+        PasswordSetDialog(
+            hasPassword = a.hasPassword,
+            onDismiss = { pw = false },
+            onDone = {
+                pw = false
+                msg = null
+                load()
+            }
+        )
+    }
+    if (unlink) {
+        AlertDialog(
+            onDismissRequest = { unlink = false },
+            containerColor = Ui.bg,
+            title = { Text("Unlink Google?") },
+            text = { Text("You will need your username and password to log in.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    unlink = false
+                    runIo({ GoogleSignIn.unlink() }) { r ->
+                        r.onSuccess { load() }.onFailure { msg = it.message }
+                    }
+                }) { Text("Unlink", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { unlink = false }) { Text("Cancel") } }
+        )
+    }
 }
 
 @Composable
