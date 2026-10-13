@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +27,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -36,6 +38,7 @@ private fun ConversationHeader(
     subtitle: String,
     typing: Boolean,
     onBack: () -> Unit,
+    onInfo: () -> Unit,
     soon: SoonState
 ) {
     Row(
@@ -47,17 +50,26 @@ private fun ConversationHeader(
         IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Ui.ink)
         }
-        Avatar(peer?.id ?: convId, peer?.displayName ?: "?", 40.dp)
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                peer?.displayName ?: "Unknown",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
-            )
-            if (subtitle.isNotEmpty()) {
-                Text(subtitle, fontSize = 12.sp, color = if (typing) Ui.ink else Ui.muted)
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onInfo() }
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Avatar(peer?.id ?: convId, peer?.displayName ?: "?", 40.dp)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    peer?.displayName ?: "Unknown",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                if (subtitle.isNotEmpty()) {
+                    Text(subtitle, fontSize = 12.sp, color = if (typing) Ui.ink else Ui.muted)
+                }
             }
         }
         IconButton(onClick = { soon.show("Video calls") }) { VideoIcon(Ui.ink) }
@@ -68,7 +80,7 @@ private fun ConversationHeader(
 }
 
 @Composable
-private fun Composer(st: ConversationState, voice: VoiceController, soon: SoonState, onAttach: () -> Unit) {
+private fun Composer(st: ConversationState, voice: VoiceController, onAttach: () -> Unit) {
     if (voice.recording) {
         RecordingBar(voice)
         return
@@ -121,15 +133,24 @@ private fun Composer(st: ConversationState, voice: VoiceController, soon: SoonSt
 }
 
 @Composable
-fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () -> Unit) {
+fun ConversationScreen(
+    me: User,
+    conv: Conv,
+    onBack: () -> Unit,
+    onLogout: () -> Unit,
+    onInfo: () -> Unit
+) {
     val ctx = LocalContext.current
     val st = remember(conv.id) { ConversationState(me, conv, ctx.applicationContext, onLogout) }
     val voice = rememberVoice(st)
     val peer = conv.peer
+    val isGroup = conv.type == "group"
+    var members by remember { mutableStateOf<Map<String, Member>>(emptyMap()) }
     var selected by remember { mutableStateOf<MsgItem?>(null) }
     var confirmDelete by remember { mutableStateOf<MsgItem?>(null) }
     var forwarding by remember { mutableStateOf<MsgItem?>(null) }
     var viewer by remember { mutableStateOf<MsgItem?>(null) }
+    var player by remember { mutableStateOf<MsgItem?>(null) }
     var attach by remember { mutableStateOf(false) }
     var jumpTo by remember { mutableStateOf<String?>(null) }
     val soon = remember { SoonState() }
@@ -137,18 +158,28 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
     val clipboard = LocalClipboardManager.current
 
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) st.sendMedia(uri, "image")
+        if (uri != null) {
+            val isVideo = ctx.contentResolver.getType(uri)?.startsWith("video/") == true
+            st.sendMedia(uri, if (isVideo) "video" else "image")
+        }
     }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) st.sendMedia(uri, "file")
     }
 
     Ticker(20000L, "poll-" + conv.id) { st.load() }
-    Ticker(20000L, "presence-" + conv.id) { st.refreshPresence() }
+    Ticker(20000L, "presence-" + conv.id) { if (!isGroup) st.refreshPresence() }
     OnRealtime { st.onEvent(it) }
 
     val lastId = st.items.lastOrNull()?.msg?.id
     LaunchedEffect(lastId) { st.markReadIfNeeded() }
+
+    val systemCount = st.items.count { it.msg.kind == "system" }
+    LaunchedEffect(conv.id, systemCount) {
+        if (isGroup) {
+            runIo({ Api.members(conv.id) }) { r -> r.onSuccess { l -> members = l.associateBy { it.id } } }
+        }
+    }
 
     val byId = remember(st.items) { st.items.associateBy { it.msg.id } }
     val rows = remember(st.items, st.pending) { buildRows(st.items + st.pending) }
@@ -170,6 +201,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
     val lastSeen = st.lastSeen
     val subtitle = when {
         typing -> "typing…"
+        isGroup -> (if (members.isNotEmpty()) members.size else conv.memberCount).toString() + " members"
         st.online == true -> "online"
         lastSeen != null -> "last seen " + seenLabel(lastSeen)
         else -> ""
@@ -187,7 +219,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            ConversationHeader(peer, conv.id, subtitle, typing, onBack, soon)
+            ConversationHeader(peer, conv.id, subtitle, typing, onBack, onInfo, soon)
             HorizontalDivider(color = Ui.line)
 
             LazyColumn(
@@ -209,31 +241,52 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                         }
                     } else if (row is MsgItem) {
                         val m = row.msg
-                        val mine = m.senderId == me.id
-                        val local = m.id.startsWith("local-")
-                        val seen = mine && !local && st.peerRead.isNotEmpty() && m.id <= st.peerRead
-                        val tick = if (!mine) "" else if (local) "…" else if (seen) "✓✓" else "✓"
-                        val rid = row.replyTo
-                        val reply = row.reply ?: rid?.let { id ->
-                            byId[id]?.let { t -> ReplyInfo(id, t.msg.senderId, t.msg.body, t.msg.deleted, t.msg.kind) }
+                        if (m.kind == "system") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp, horizontal = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    m.body ?: "",
+                                    fontSize = 12.sp,
+                                    color = Ui.muted,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            val mine = m.senderId == me.id
+                            val local = m.id.startsWith("local-")
+                            val seen = mine && !isGroup && !local && st.peerRead.isNotEmpty() && m.id <= st.peerRead
+                            val tick = if (!mine) "" else if (local) "…" else if (seen) "✓✓" else "✓"
+                            val rid = row.replyTo
+                            val reply = row.reply ?: rid?.let { id ->
+                                byId[id]?.let { t -> ReplyInfo(id, t.msg.senderId, t.msg.body, t.msg.deleted, t.msg.kind) }
+                            }
+                            val replyName = if (reply?.senderId == me.id) "You"
+                            else if (isGroup) (members[reply?.senderId]?.displayName ?: "Member")
+                            else (peer?.displayName ?: "Unknown")
+                            val senderName = if (isGroup && !mine) (members[m.senderId]?.displayName ?: "…") else null
+                            Bubble(
+                                cid = conv.id,
+                                item = row,
+                                mine = mine,
+                                tick = tick,
+                                senderName = senderName,
+                                reply = reply,
+                                replyName = replyName,
+                                reactions = st.reacts[m.id] ?: emptyList(),
+                                myId = me.id,
+                                progress = st.progress[m.id],
+                                onLongPress = { selected = row },
+                                onReact = { e -> st.react(m.id, e) },
+                                onQuote = { if (rid != null) jumpTo = rid },
+                                onImage = { viewer = row },
+                                onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } },
+                                onVideo = { player = row }
+                            )
                         }
-                        val replyName = if (reply?.senderId == me.id) "You" else (peer?.displayName ?: "Unknown")
-                        Bubble(
-                            cid = conv.id,
-                            item = row,
-                            mine = mine,
-                            tick = tick,
-                            reply = reply,
-                            replyName = replyName,
-                            reactions = st.reacts[m.id] ?: emptyList(),
-                            myId = me.id,
-                            progress = st.progress[m.id],
-                            onLongPress = { selected = row },
-                            onReact = { e -> st.react(m.id, e) },
-                            onQuote = { if (rid != null) jumpTo = rid },
-                            onImage = { viewer = row },
-                            onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } }
-                        )
                     }
                 }
             }
@@ -257,7 +310,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
                 ) { st.replyTo = null }
             }
 
-            Composer(st, voice, soon) { attach = true }
+            Composer(st, voice) { attach = true }
         }
 
         SoonToast(soon, 80.dp)
@@ -301,7 +354,7 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
         AttachSheet(
             onPhoto = {
                 attach = false
-                pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             },
             onFile = {
                 attach = false
@@ -319,12 +372,16 @@ fun ConversationScreen(me: User, conv: Conv, onBack: () -> Unit, onLogout: () ->
         ImageViewer(conv.id, v, onClose = { viewer = null })
     }
 
+    player?.let { v ->
+        VideoPlayerDialog(conv.id, v, onClose = { player = null })
+    }
+
     confirmDelete?.let { x ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
             containerColor = Ui.bg,
             title = { Text("Delete message?") },
-            text = { Text("This removes it for both of you.") },
+            text = { Text("This removes it for everyone in the chat.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = null
