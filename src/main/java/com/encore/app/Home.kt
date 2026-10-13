@@ -21,12 +21,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 private val homeHandler = Handler(Looper.getMainLooper())
 
@@ -96,6 +99,8 @@ private val avatarTones = listOf(0xFFE3E8EF, 0xFFEADFD5, 0xFFDDE7DF, 0xFFE9DDE6,
 @Composable
 fun Avatar(seed: String, name: String, size: Dp) {
     val tone = Color(avatarTones[Math.floorMod(seed.hashCode(), avatarTones.size)])
+    val url = Avatars.url(seed)
+    val ctx = LocalContext.current
     Box(
         modifier = Modifier
             .size(size)
@@ -109,6 +114,21 @@ fun Avatar(seed: String, name: String, size: Dp) {
             fontWeight = FontWeight.Medium,
             fontSize = (size.value * 0.4f).sp
         )
+        if (url != null) {
+            val req = remember(url) {
+                ImageRequest.Builder(ctx)
+                    .data(url)
+                    .addHeader("Authorization", "Bearer ${Session.token}")
+                    .crossfade(true)
+                    .build()
+            }
+            AsyncImage(
+                model = req,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
 
@@ -204,7 +224,13 @@ private fun ThemeDialog(onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
+fun ChatListScreen(
+    me: User,
+    onOpen: (Conv) -> Unit,
+    onLogout: () -> Unit,
+    onProfile: () -> Unit,
+    onNewGroup: () -> Unit
+) {
     var chats by remember { mutableStateOf<List<Conv>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
@@ -289,7 +315,7 @@ fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
                         Text("Add story", fontSize = 12.sp, color = Ui.muted)
                     }
                 }
-                items(chats.filter { it.peer != null }.take(10), key = { it.id }) { c ->
+                items(chats.filter { it.type == "dm" && it.peer != null }.take(10), key = { it.id }) { c ->
                     val p = c.peer!!
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -364,8 +390,9 @@ fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
                     val preview = when {
                         last == null -> "Say hello"
                         last.deleted -> "Message deleted"
+                        last.kind == "system" -> last.preview ?: ""
                         last.preview != null -> (if (last.senderId == me.id) "You: " else "") + last.preview
-                        else -> "Media"
+                        else -> (if (last.senderId == me.id) "You: " else "") + kindLabel(last.kind)
                     }
                     Row(
                         modifier = Modifier
@@ -401,7 +428,7 @@ fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(Ui.ink)
+                                        .background(if (c.muted) Ui.muted else Ui.ink)
                                         .padding(horizontal = 7.dp, vertical = 2.dp)
                                 ) {
                                     Text(
@@ -444,7 +471,7 @@ fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .clickable { soon.show("Profile") }
+                        .clickable { onProfile() }
                         .padding(10.dp)
                 ) {
                     Icon(Icons.Default.Person, contentDescription = "Profile", tint = Ui.muted)
@@ -461,11 +488,15 @@ fun ChatListScreen(me: User, onOpen: (Conv) -> Unit, onLogout: () -> Unit) {
                 sheet = false
                 startDialog = true
             }
+            SheetRow(Icons.Default.Face, "New Group", "Chat with several people at once") {
+                sheet = false
+                onNewGroup()
+            }
             SheetRow(Icons.Default.AccountCircle, "New Contact", "Add a contact to be able to send messages") {
                 sheet = false
                 soon.show("New contact")
             }
-            SheetRow(Icons.Default.Face, "New Community", "Join the community around you") {
+            SheetRow(Icons.Default.Star, "New Community", "Join the community around you") {
                 sheet = false
                 soon.show("Communities")
             }
