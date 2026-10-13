@@ -9,6 +9,9 @@ sealed interface Route {
     data class UserInfo(val conv: Conv) : Route
     data object NewGroup : Route
     data class GroupInfo(val conv: Conv) : Route
+    data object Search : Route
+    data object Settings : Route
+    data object Sessions : Route
 }
 
 @Composable
@@ -33,7 +36,9 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
             onOpen = { stack.add(Route.Chat(it)) },
             onLogout = onLogout,
             onProfile = { stack.add(Route.MyProfile) },
-            onNewGroup = { stack.add(Route.NewGroup) }
+            onNewGroup = { stack.add(Route.NewGroup) },
+            onSearch = { stack.add(Route.Search) },
+            onSettings = { stack.add(Route.Settings) }
         )
         is Route.Chat -> ConversationScreen(
             me, top.conv,
@@ -62,5 +67,19 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
                 if (i > 0 && stack[i - 1] is Route.Chat) stack[i - 1] = Route.Chat(c)
             }
         )
+        Route.Search -> SearchScreen(
+            me,
+            onBack = { back() },
+            onOpen = { c ->
+                back()
+                stack.add(Route.Chat(c))
+            }
+        )
+        Route.Settings -> SettingsScreen(
+            onBack = { back() },
+            onSessions = { stack.add(Route.Sessions) },
+            onLogout = onLogout
+        )
+        Route.Sessions -> SessionsScreen(onBack = { back() }, onLogout = onLogout)
     }
 }
