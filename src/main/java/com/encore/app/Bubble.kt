@@ -31,6 +31,7 @@ internal fun Bubble(
     item: MsgItem,
     mine: Boolean,
     tick: String,
+    senderName: String?,
     reply: ReplyInfo?,
     replyName: String,
     reactions: List<Pair<String, String>>,
@@ -40,11 +41,13 @@ internal fun Bubble(
     onReact: (String) -> Unit,
     onQuote: () -> Unit,
     onImage: () -> Unit,
-    onFile: () -> Unit
+    onFile: () -> Unit,
+    onVideo: () -> Unit
 ) {
     val m = item.msg
     val deleted = m.deleted
     val isVoice = !deleted && item.media != null && m.kind == "voice"
+    val isVideo = !deleted && item.media != null && m.kind == "video"
     val hasMedia = !deleted && item.media != null && (m.kind == "image" || m.kind == "file")
     val haptic = LocalHapticFeedback.current
     val shape = if (mine) {
@@ -80,6 +83,16 @@ internal fun Bubble(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.End
             ) {
+                if (senderName != null) {
+                    Text(
+                        senderName,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                }
                 if (!deleted && item.fwdFrom != null) {
                     Text(
                         "Forwarded from ${item.fwdFrom}",
@@ -121,6 +134,14 @@ internal fun Bubble(
                 if (isVoice) {
                     Box(modifier = Modifier.align(Alignment.Start)) {
                         VoiceRow(cid, item, progress)
+                    }
+                } else if (isVideo) {
+                    Box(modifier = Modifier.align(Alignment.Start)) {
+                        VideoBlock(item, progress, onVideo)
+                    }
+                    if (!m.body.isNullOrBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(m.body, fontSize = 16.sp, modifier = Modifier.align(Alignment.Start))
                     }
                 } else if (hasMedia) {
                     Box(modifier = Modifier.align(Alignment.Start)) {
