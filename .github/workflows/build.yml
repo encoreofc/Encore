@@ -20,13 +20,21 @@ jobs:
         with:
           gradle-version: 8.9
 
-      - name: Build debug APK
+      - name: Decode keystore
         env:
-          TURSO_URL: ${{ secrets.TURSO_URL }}
-          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/encore.jks"
+          fi
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/encore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           set -o pipefail
-          gradle assembleDebug --no-daemon 2>&1 | tee build.log
+          gradle assembleRelease --no-daemon 2>&1 | tee build.log
 
       - name: Show errors
         if: failure()
@@ -41,5 +49,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: encore-debug
-          path: build/outputs/apk/debug/*.apk
+          name: encore-release
+          path: build/outputs/apk/release/*.apk
