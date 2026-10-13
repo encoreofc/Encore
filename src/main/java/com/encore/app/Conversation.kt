@@ -136,6 +136,7 @@ private fun Composer(st: ConversationState, voice: VoiceController, onAttach: ()
 fun ConversationScreen(
     me: User,
     conv: Conv,
+    startJump: String?,
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onInfo: () -> Unit
@@ -152,7 +153,7 @@ fun ConversationScreen(
     var viewer by remember { mutableStateOf<MsgItem?>(null) }
     var player by remember { mutableStateOf<MsgItem?>(null) }
     var attach by remember { mutableStateOf(false) }
-    var jumpTo by remember { mutableStateOf<String?>(null) }
+    var jumpTo by remember { mutableStateOf(startJump) }
     val soon = remember { SoonState() }
     val listState = rememberLazyListState()
     val clipboard = LocalClipboardManager.current
@@ -185,14 +186,19 @@ fun ConversationScreen(
     val rows = remember(st.items, st.pending) { buildRows(st.items + st.pending) }
 
     LaunchedEffect(rows.size) {
-        if (rows.isNotEmpty()) listState.scrollToItem(rows.size - 1)
+        if (rows.isNotEmpty() && jumpTo == null) listState.scrollToItem(rows.size - 1)
     }
 
-    LaunchedEffect(jumpTo) {
+    LaunchedEffect(jumpTo, rows.size) {
         val id = jumpTo
-        if (id != null) {
+        if (id != null && rows.isNotEmpty()) {
             val idx = rows.indexOfFirst { it is MsgItem && it.msg.id == id }
-            if (idx >= 0) listState.animateScrollToItem(idx)
+            if (idx >= 0) {
+                listState.animateScrollToItem(idx)
+            } else {
+                Toast.makeText(ctx, "That message is older. Scroll up to find it.", Toast.LENGTH_SHORT).show()
+                listState.scrollToItem(rows.size - 1)
+            }
             jumpTo = null
         }
     }
