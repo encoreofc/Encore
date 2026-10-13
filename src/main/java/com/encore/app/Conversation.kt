@@ -1,5 +1,9 @@
 package com.encore.app
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -30,6 +34,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+private fun Context.findActivity(): Activity? {
+    var c: Context = this
+    while (c is ContextWrapper) {
+        if (c is Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
 
 @Composable
 private fun ConversationHeader(
@@ -142,6 +155,19 @@ fun ConversationScreen(
     onInfo: () -> Unit
 ) {
     val ctx = LocalContext.current
+
+    // Keyboard fix: make the window resize (not pan) while this chat is open, so the
+    // content never gets pushed up above the keyboard. Restored when leaving the chat.
+    val activity = remember(ctx) { ctx.findActivity() }
+    DisposableEffect(activity) {
+        val w = activity?.window
+        val old = w?.attributes?.softInputMode
+        w?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        onDispose {
+            if (w != null && old != null) w.setSoftInputMode(old)
+        }
+    }
+
     val st = remember(conv.id) { ConversationState(me, conv, ctx.applicationContext, onLogout) }
     val voice = rememberVoice(st)
     val peer = conv.peer
@@ -185,19 +211,34 @@ fun ConversationScreen(
     val byId = remember(st.items) { st.items.associateBy { it.msg.id } }
     val rows = remember(st.items, st.pending) { buildRows(st.items + st.pending) }
 
-    LaunchedEffect(rows.size) {
-        if (rows.isNotEmpty() && jumpTo == null) listState.scrollToItem(rows.size - 1)
+    // Newest message is index 0 (reverseLayout), so the chat always opens at the bottom
+    // with no jump, and stays pinned to the bottom when the keyboard opens.
+    val rev = remember(rows) { rows.reversed() }
+
+    var wasNear by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
+            .collect { (scrolling, idx) -> if (scrolling) wasNear = idx <= 1 }
+    }
+
+    val newest = rows.lastOrNull()
+    val newestKey: Any? = if (newest is MsgItem) newest.msg.id else newest
+    LaunchedEffect(newestKey) {
+        if (newest != null && jumpTo == null) {
+            val mineNew = newest is MsgItem && newest.msg.senderId == me.id
+            if (wasNear || mineNew) listState.animateScrollToItem(0)
+        }
     }
 
     LaunchedEffect(jumpTo, rows.size) {
         val id = jumpTo
         if (id != null && rows.isNotEmpty()) {
-            val idx = rows.indexOfFirst { it is MsgItem && it.msg.id == id }
+            val idx = rev.indexOfFirst { it is MsgItem && it.msg.id == id }
             if (idx >= 0) {
-                listState.animateScrollToItem(idx)
+                listState.animateScrollToItem(idx, -(listState.layoutInfo.viewportSize.height / 3))
             } else {
                 Toast.makeText(ctx, "That message is older. Scroll up to find it.", Toast.LENGTH_SHORT).show()
-                listState.scrollToItem(rows.size - 1)
+                listState.scrollToItem(0)
             }
             jumpTo = null
         }
@@ -230,12 +271,13 @@ fun ConversationScreen(
 
             LazyColumn(
                 state = listState,
+                reverseLayout = true,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                items(rows, key = { if (it is MsgItem) it.msg.id else it }) { row ->
+                items(rev, key = { if (it is MsgItem) it.msg.id else it }) { row ->
                     if (row is String) {
                         Box(
                             modifier = Modifier
