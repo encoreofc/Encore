@@ -179,6 +179,7 @@ fun ConversationScreen(
     var forwarding by remember { mutableStateOf<MsgItem?>(null) }
     var viewer by remember { mutableStateOf<MsgItem?>(null) }
     var player by remember { mutableStateOf<MsgItem?>(null) }
+    var once by remember { mutableStateOf<OnceSession?>(null) }
     var attach by remember { mutableStateOf(false) }
     var jumpTo by remember { mutableStateOf(startJump) }
     val soon = remember { SoonState() }
@@ -336,7 +337,8 @@ fun ConversationScreen(
                                 onQuote = { if (rid != null) jumpTo = rid },
                                 onImage = { viewer = row },
                                 onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } },
-                                onVideo = { player = row }
+                                onVideo = { player = row },
+                                onOnce = { st.openOnce(row) { once = it } }
                             )
                         }
                     }
@@ -455,6 +457,10 @@ fun ConversationScreen(
 
     player?.let { v ->
         VideoPlayerDialog(conv.id, v, onClose = { player = null })
+    }
+
+    once?.let { s ->
+        OnceViewer(conv.id, s, onClose = { once = null })
     }
 
     confirmDelete?.let { x ->
