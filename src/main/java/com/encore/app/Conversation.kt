@@ -187,6 +187,7 @@ fun ConversationScreen(
     var attach by remember { mutableStateOf(false) }
     var jumpTo by remember { mutableStateOf(startJump) }
     val soon = remember { SoonState() }
+    val micGate = rememberMicGate()
     val listState = rememberLazyListState()
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
