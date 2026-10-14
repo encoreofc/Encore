@@ -21,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -186,9 +187,12 @@ fun UserPageScreen(
     onMedia: () -> Unit
 ) {
     val peer = conv.peer
-    var bio by remember { mutableStateOf<String?>(null) }
-    var location by remember { mutableStateOf<String?>(null) }
-    var blocked by remember { mutableStateOf(false) }
+    // what was last known is used right away, so the page does not fill in piece by piece
+    val cached = remember(conv.id) { peer?.let { ProfileCache.get(it.id) } }
+    var bio by remember(conv.id) { mutableStateOf<String?>(cached?.bio) }
+    var location by remember(conv.id) { mutableStateOf<String?>(cached?.location) }
+    var blocked by remember(conv.id) { mutableStateOf(cached?.blocked ?: false) }
+    var ready by remember(conv.id) { mutableStateOf(cached != null || peer == null) }
     var muted by remember { mutableStateOf(conv.muted) }
     var group by remember { mutableStateOf<StoryGroup?>(null) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -196,6 +200,12 @@ fun UserPageScreen(
     var report by remember { mutableStateOf(false) }
     val soon = remember { SoonState() }
     val appCtx = LocalContext.current.applicationContext
+
+    // never leave the page waiting: after a short moment show whatever is known
+    LaunchedEffect(conv.id) {
+        kotlinx.coroutines.delay(1200)
+        ready = true
+    }
 
     LaunchedEffect(conv.id) {
         if (peer != null) {
@@ -206,6 +216,8 @@ fun UserPageScreen(
                         bio = p.bio
                         location = p.location
                         blocked = p.blocked
+                        ProfileCache.put(p)
+                        ready = true
                     }
                 }
             }
@@ -215,11 +227,17 @@ fun UserPageScreen(
                     bio = if (u.isNull("bio")) null else u.getString("bio")
                     location = if (u.isNull("location")) null else u.getString("location")
                     blocked = u.optBoolean("blocked")
+                    ready = true
                     val b0 = bio
                     val l0 = location
                     val k0 = blocked
-                    runIo({ Db.dao(appCtx).putProfileNow(ProfileEntity(peer.id, b0, l0, k0)) }) { }
-                }.onFailure { msg = it.message }
+                    val fresh = ProfileEntity(peer.id, b0, l0, k0)
+                    ProfileCache.put(fresh)
+                    runIo({ Db.dao(appCtx).putProfileNow(fresh) }) { }
+                }.onFailure {
+                    ready = true
+                    msg = it.message
+                }
             }
             runIo({ StoriesApi.userGroup(peer) }) { r -> r.onSuccess { group = it } }
         }
@@ -260,9 +278,15 @@ fun UserPageScreen(
                 if (!b.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(b, fontSize = 14.sp, color = Ui.muted, textAlign = TextAlign.Center)
+                } else if (!ready) {
+                    // keep the room of the bio line until we know whether there is one
+                    Spacer(Modifier.height(24.dp))
                 }
                 Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.alpha(if (ready) 1f else 0f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     val loc = location
                     if (!loc.isNullOrBlank()) {
                         Icon(Icons.Default.LocationOn, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(16.dp))
