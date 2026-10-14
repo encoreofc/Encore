@@ -46,7 +46,11 @@ class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val d = message.data
         when (d["type"]) {
-            "message" -> showMessage(d["c"] ?: return, d["title"] ?: "Encore", d["body"] ?: "New message")
+            "message" -> {
+                // pull the new message into the local database right away, even if the app is closed
+                Sync.kick()
+                showMessage(d["c"] ?: return, d["title"] ?: "Encore", d["body"] ?: "New message")
+            }
             // "call" and "missed_call" come in the calls step
         }
     }
