@@ -91,8 +91,8 @@ private fun ConversationHeader(
             }
         }
         IconButton(onClick = { soon.show("Video calls") }) { VideoIcon(Ui.ink) }
-        IconButton(onClick = { soon.show("Calls") }) {
-            Icon(Icons.Default.Call, contentDescription = "Call", tint = Ui.ink)
+        IconButton(onClick = onCall) {
+        Icon(Icons.Default.Call, contentDescription = "Call", tint = Ui.ink)
         }
     }
 }
