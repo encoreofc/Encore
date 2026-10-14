@@ -37,6 +37,9 @@ object Outbox {
     var progress by mutableStateOf<Map<String, Float>>(emptyMap())
         private set
 
+    fun setProgress(id: String, p: Float) { progress = progress + (id to p) }
+    fun clearProgress(id: String) { progress = progress - id }
+
     /** the open chat sets this to show a send error */
     @Volatile
     var onProblem: ((String) -> Unit)? = null
