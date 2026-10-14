@@ -16,6 +16,8 @@ sealed interface Route {
     data object StoryCreate : Route
     data class ChatSearch(val conv: Conv) : Route
     data class Gallery(val conv: Conv) : Route
+    data object Bots : Route
+    data class BotChat(val bot: Bot) : Route
 }
 
 @Composable
@@ -42,6 +44,7 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
             onProfile = { stack.add(Route.MyProfile) },
             onNewGroup = { stack.add(Route.NewGroup) },
             onSearch = { stack.add(Route.Search) },
+            onBots = { stack.add(Route.Bots) },
             onSettings = { stack.add(Route.Settings) },
             onStories = { g, gi, si -> stack.add(Route.StoryViewer(g, gi, si)) },
             onAddStory = { stack.add(Route.StoryCreate) }
@@ -104,5 +107,7 @@ fun ChatApp(me: User, onLogout: () -> Unit) {
             }
         )
         is Route.Gallery -> GalleryScreen(top.conv, onBack = { back() })
+        Route.Bots -> BotsScreen(onBack = { back() }, onOpen = { stack.add(Route.BotChat(it)) })
+        is Route.BotChat -> BotChatScreen(top.bot, onBack = { back() })
     }
 }
