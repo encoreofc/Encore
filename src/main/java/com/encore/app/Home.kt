@@ -83,7 +83,7 @@ fun ChatListScreen(
             ) {
                 Text(
                     "Encore",
-                    fontSize = 20.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f)
                 )
@@ -148,27 +148,27 @@ fun ChatListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpen(c) }
-                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(p?.id ?: c.id, name, 48.dp)
-                        Spacer(Modifier.width(12.dp))
+                        Avatar(p?.id ?: c.id, name, 52.dp)
+                        Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 name,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontSize = 16.sp,
+                                fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(3.dp))
+                            Spacer(Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (mineLast) {
                                     Icon(
                                         Icons.Default.Done,
                                         contentDescription = null,
                                         tint = Ui.muted,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(Modifier.width(4.dp))
                                 }
@@ -176,7 +176,7 @@ fun ChatListScreen(
                                     preview,
                                     color = if (c.unread > 0) Ui.ink else Ui.muted,
                                     fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Normal,
-                                    fontSize = 13.sp,
+                                    fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -184,7 +184,7 @@ fun ChatListScreen(
                         }
                         Spacer(Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = 11.sp)
+                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = 12.sp)
                             if (c.unread > 0) {
                                 Spacer(Modifier.height(5.dp))
                                 Box(
@@ -198,7 +198,7 @@ fun ChatListScreen(
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
                                         color = if (c.muted) Ui.onInk else Color(0xFF111111),
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
