@@ -54,6 +54,10 @@ private fun ConversationHeader(
     onBack: () -> Unit,
     onInfo: () -> Unit,
     soon: SoonState
+        onInfo: () -> Unit,
+    soon: SoonState,
+    onCall: () -> Unit
+) {
 ) {
     Row(
         modifier = Modifier
