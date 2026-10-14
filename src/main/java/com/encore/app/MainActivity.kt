@@ -32,8 +32,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
+    private val askNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         edgeToEdgeLight()
@@ -44,6 +52,16 @@ class MainActivity : ComponentActivity() {
                     var user by remember { mutableStateOf(Session.user) }
                     val ctx = LocalContext.current
                     val current = user
+                    LaunchedEffect(current?.id) {
+                        if (current != null) {
+                            if (Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                            Push.register()
+                        }
+                    }
                     if (current == null) {
                         AuthScreen { token, u ->
                             Session.save(ctx, token, u)
@@ -52,7 +70,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         ChatApp(current) {
                             val t = Session.token
-                            if (t != null) runIo({ runCatching { Api.logout(t) } }) { }
+                            if (t != null) runIo({ Push.unregister(t); runCatching { Api.logout(t) } }) { }
                             Session.clear(ctx)
                             user = null
                         }
