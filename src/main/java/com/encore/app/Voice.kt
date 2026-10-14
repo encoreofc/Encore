@@ -189,12 +189,12 @@ class VoiceController(private val st: ConversationState, private val ctx: Contex
             Media("voice.m4a", f.length(), "audio/mp4", 0, 0, durMs, Uri.fromFile(f).toString())
         )
         st.pending = st.pending + local
-        st.progress = st.progress + (lid to 0f)
+        Outbox.setProgress(lid, 0f)
         st.replyTo = null
         st.problem = null
         runIo({ VoiceUpload.send(st.conv.id, f, durMs, cid, rep?.msg?.id) }) { r ->
             st.pending = st.pending.filter { it.msg.clientId != cid }
-            st.progress = st.progress - lid
+            Outbox.clearProgress(lid)
             f.delete()
             r.onSuccess { m -> st.items = addItem(st.items, m) }.onFailure { st.problem = it.message }
         }
