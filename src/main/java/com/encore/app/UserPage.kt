@@ -195,14 +195,30 @@ fun UserPageScreen(
     var confirmBlock by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf(false) }
     val soon = remember { SoonState() }
+    val appCtx = LocalContext.current.applicationContext
 
     LaunchedEffect(conv.id) {
         if (peer != null) {
+            // 1) what we already know, instantly
+            runIo({ Db.dao(appCtx).profileNow(peer.id) }) { r ->
+                r.onSuccess { p ->
+                    if (p != null) {
+                        bio = p.bio
+                        location = p.location
+                        blocked = p.blocked
+                    }
+                }
+            }
+            // 2) refresh from the server and remember it
             runIo({ Api.call("GET", "/v1/users/${peer.id}").getJSONObject("user") }) { r ->
                 r.onSuccess { u ->
                     bio = if (u.isNull("bio")) null else u.getString("bio")
                     location = if (u.isNull("location")) null else u.getString("location")
                     blocked = u.optBoolean("blocked")
+                    val b0 = bio
+                    val l0 = location
+                    val k0 = blocked
+                    runIo({ Db.dao(appCtx).putProfileNow(ProfileEntity(peer.id, b0, l0, k0)) }) { }
                 }.onFailure { msg = it.message }
             }
             runIo({ StoriesApi.userGroup(peer) }) { r -> r.onSuccess { group = it } }
