@@ -1,12 +1,17 @@
 package com.encore.app
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +56,8 @@ object CallManager {
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private var ringtone: Ringtone? = null
+    private var ringback: ToneGenerator? = null
+    private var vibrator: Vibrator? = null
     private var callId: String? = null
     private var ice: JSONArray = JSONArray()
 
@@ -90,6 +97,7 @@ object CallManager {
         speaker = false
         seconds = 0
         phase = CallPhase.Calling
+        startRingback()
         Thread {
             try {
                 val r = Api.call("POST", "/v1/calls", JSONObject().put("conversation_id", cid))
@@ -178,6 +186,7 @@ object CallManager {
             "accepted" -> if (id == callId) {
                 if (phase == CallPhase.Calling) {
                     val g = gen
+                    stopRingback()
                     phase = CallPhase.Connecting
                     startPing(g, id)
                     connectMedia(id, ice, g)
@@ -204,6 +213,7 @@ object CallManager {
         gen++
         main.removeCallbacksAndMessages(null)
         stopRing()
+        stopRingback()
         releaseMedia()
         phase = CallPhase.Idle
         callId = null
@@ -227,13 +237,51 @@ object CallManager {
         }
     }
 
+    /** Incoming call: the phone's own ringtone (at ring volume) plus vibration, following the ringer switch. */
     private fun startRing() {
         val c = appCtx ?: return
+        val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val mode = am?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
+        if (mode == AudioManager.RINGER_MODE_SILENT) return
+        startVibration(c)
+        if (mode != AudioManager.RINGER_MODE_NORMAL) return
         try {
-            val r = RingtoneManager.getRingtone(c, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+            val uri = RingtoneManager.getActualDefaultRingtoneUri(c, RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            val r = RingtoneManager.getRingtone(c, uri) ?: return
+            r.audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
             if (Build.VERSION.SDK_INT >= 28) r.isLooping = true
             r.play()
             ringtone = r
+            if (Build.VERSION.SDK_INT < 28) keepRinging()
+        } catch (e: Exception) {
+        }
+    }
+
+    // Android 8 and 9 have no looping ringtone, so start it again when it ends
+    private fun keepRinging() {
+        main.postDelayed({
+            val r = ringtone ?: return@postDelayed
+            try {
+                if (!r.isPlaying) r.play()
+            } catch (e: Exception) {
+            }
+            keepRinging()
+        }, 2000L)
+    }
+
+    private fun startVibration(c: Context) {
+        try {
+            val v: Vibrator = if (Build.VERSION.SDK_INT >= 31) {
+                (c.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            } else {
+                c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 900, 900), 0))
+            vibrator = v
         } catch (e: Exception) {
         }
     }
@@ -241,6 +289,25 @@ object CallManager {
     private fun stopRing() {
         try { ringtone?.stop() } catch (e: Exception) {}
         ringtone = null
+        try { vibrator?.cancel() } catch (e: Exception) {}
+        vibrator = null
+    }
+
+    /** Outgoing call: the usual "tu-u tu-u" ringing tone until the other person answers or the call ends. */
+    private fun startRingback() {
+        stopRingback()
+        try {
+            val t = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80)
+            t.startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            ringback = t
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun stopRingback() {
+        try { ringback?.stopTone() } catch (e: Exception) {}
+        try { ringback?.release() } catch (e: Exception) {}
+        ringback = null
     }
 
     private fun startTimer(g: Int) {
