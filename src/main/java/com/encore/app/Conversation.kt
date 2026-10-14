@@ -53,11 +53,8 @@ private fun ConversationHeader(
     typing: Boolean,
     onBack: () -> Unit,
     onInfo: () -> Unit,
-    soon: SoonState
-        onInfo: () -> Unit,
     soon: SoonState,
     onCall: () -> Unit
-) {
 ) {
     Row(
         modifier = Modifier
@@ -92,7 +89,7 @@ private fun ConversationHeader(
         }
         IconButton(onClick = { soon.show("Video calls") }) { VideoIcon(Ui.ink) }
         IconButton(onClick = onCall) {
-        Icon(Icons.Default.Call, contentDescription = "Call", tint = Ui.ink)
+            Icon(Icons.Default.Call, contentDescription = "Call", tint = Ui.ink)
         }
     }
 }
