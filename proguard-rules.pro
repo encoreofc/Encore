@@ -3,3 +3,5 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
