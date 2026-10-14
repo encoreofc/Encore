@@ -38,6 +38,7 @@ import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.Box
 
 class MainActivity : ComponentActivity() {
     private val askNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         edgeToEdgeLight()
         Session.load(this)
+        CallManager.init(this)
         setContent {
             EncoreTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -62,17 +64,20 @@ class MainActivity : ComponentActivity() {
                             Push.register()
                         }
                     }
-                    if (current == null) {
-                        AuthScreen { token, u ->
-                            Session.save(ctx, token, u)
-                            user = u
-                        }
-                    } else {
-                        ChatApp(current) {
-                            val t = Session.token
-                            if (t != null) runIo({ Push.unregister(t); runCatching { Api.logout(t) } }) { }
-                            Session.clear(ctx)
-                            user = null
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (current == null) {
+                            AuthScreen { token, u ->
+                                Session.save(ctx, token, u)
+                                user = u
+                            }
+                        } else {
+                            ChatApp(current) {
+                                val t = Session.token
+                                if (t != null) runIo({ Push.unregister(t); runCatching { Api.logout(t) } }) { }
+                                Session.clear(ctx)
+                                user = null
+                            }
+                            CallHost()
                         }
                     }
                 }
@@ -80,7 +85,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
 @Composable
 private fun AuthScreen(onDone: (String, User) -> Unit) {
     val ctx = LocalContext.current
