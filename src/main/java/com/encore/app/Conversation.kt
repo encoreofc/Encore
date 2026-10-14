@@ -276,7 +276,10 @@ fun ConversationScreen(
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            ConversationHeader(peer, conv.id, subtitle, typing, onBack, onInfo, soon)
+                ConversationHeader(peer, conv.id, subtitle, typing, onBack, onInfo, soon) {
+                if (isGroup) soon.show("Group calls")
+                else micGate { CallManager.start(conv.id, peer?.id ?: "", peer?.displayName ?: "") }
+            }
             HorizontalDivider(color = Ui.line)
 
             LazyColumn(
