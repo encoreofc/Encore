@@ -1,5 +1,6 @@
 package com.encore.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -43,14 +44,62 @@ import androidx.compose.foundation.layout.Box
 class MainActivity : ComponentActivity() {
     private val askNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    // true while the app is allowed to show over the lock screen because of an incoming call
+    private var overLock = false
+    private var sawCall = false
+
+    /** opened from the "incoming call" notification: show the call even on the lock screen */
+    private fun handleCallIntent(i: Intent?) {
+        if (i == null) return
+        val id = i.getStringExtra(CallNotification.EXTRA_CALL) ?: return
+        val peer = i.getStringExtra(CallNotification.EXTRA_PEER) ?: ""
+        val name = i.getStringExtra(CallNotification.EXTRA_NAME) ?: "Unknown"
+        i.removeExtra(CallNotification.EXTRA_CALL)
+        CallNotification.cancel(this)
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            overLock = true
+            sawCall = false
+            // if the call turns out to be over already, do not stay visible over the lock screen
+            window.decorView.postDelayed({ if (CallManager.phase == CallPhase.Idle) clearOverLock() }, 20000L)
+        }
+        CallManager.incomingFromPush(id, peer, name)
+    }
+
+    private fun clearOverLock() {
+        if (!overLock) return
+        overLock = false
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        }
+    }
+
+    private fun onCallPhase(phase: CallPhase) {
+        if (phase != CallPhase.Idle) sawCall = true
+        else if (sawCall) {
+            sawCall = false
+            clearOverLock()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleCallIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         edgeToEdgeLight()
         Session.load(this)
         CallManager.init(this)
+        handleCallIntent(intent)
         setContent {
             EncoreTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    LaunchedEffect(CallManager.phase) { onCallPhase(CallManager.phase) }
                     var user by remember { mutableStateOf(Session.user) }
                     val ctx = LocalContext.current
                     val current = user
