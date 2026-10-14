@@ -15,8 +15,10 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +42,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+
+private val UserPageYellow = Color(0xFFFFC400)
+private val UserPageOnYellow = Color(0xFF111111)
 
 @Composable
 private fun GalleryGlyph(color: Color) {
@@ -72,6 +77,28 @@ private fun GalleryGlyph(color: Color) {
     }
 }
 
+// circle with a slash, drawn by hand like the gallery icon (no extra icon library needed)
+@Composable
+private fun BlockGlyph(color: Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val w = size.width
+        val sw = w * 0.09f
+        drawCircle(
+            color,
+            radius = w * 0.38f,
+            center = Offset(w / 2f, w / 2f),
+            style = Stroke(width = sw)
+        )
+        drawLine(
+            color,
+            start = Offset(w * 0.24f, w * 0.24f),
+            end = Offset(w * 0.76f, w * 0.76f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
 @Composable
 private fun Pill(
     label: String,
@@ -82,10 +109,11 @@ private fun Pill(
 ) {
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
             .background(if (dark) Ui.ink else Ui.soft)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 10.dp),
+            .padding(horizontal = 10.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -103,19 +131,26 @@ private fun Pill(
 }
 
 @Composable
-private fun PrefRow(label: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun PrefRow(
+    label: String,
+    onClick: () -> Unit,
+    color: Color = Ui.ink,
+    chevron: Boolean = true,
+    icon: @Composable () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 14.dp, horizontal = 4.dp),
+            .padding(vertical = 14.dp, horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         icon()
         Spacer(Modifier.width(14.dp))
-        Text(label, fontSize = 16.sp, modifier = Modifier.weight(1f))
-        Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Ui.muted)
+        Text(label, color = color, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        if (chevron) {
+            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Ui.muted)
+        }
     }
 }
 
@@ -268,12 +303,12 @@ fun UserPageScreen(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 100.dp)
-                Spacer(Modifier.height(12.dp))
-                Text(peer?.displayName ?: "Unknown", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 120.dp)
+                Spacer(Modifier.height(14.dp))
+                Text(peer?.displayName ?: "Unknown", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                 val b = bio
                 if (!b.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
@@ -300,23 +335,26 @@ fun UserPageScreen(
                         Text("@" + peer.username, fontSize = 13.sp, color = Ui.muted)
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(20.dp))
+                // all three actions share one style so they read as a set
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Pill("Audio", true, { soon.show("Calls") }, Modifier.weight(1f)) {
-                        Icon(Icons.Default.Call, contentDescription = null, tint = Ui.onInk, modifier = Modifier.size(18.dp))
+                    Pill("Audio", false, { soon.show("Calls") }, Modifier.weight(1f)) {
+                        Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(20.dp))
                     }
-                    Pill("Video", true, { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.onInk) }
+                    Pill("Video", false, { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.ink) }
                     Pill("Search", false, onSearch, Modifier.weight(1f)) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(20.dp))
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(28.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Story", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -336,7 +374,15 @@ fun UserPageScreen(
                 Spacer(Modifier.height(10.dp))
                 val g = group
                 if (g == null) {
-                    Text("No stories right now", color = Ui.muted, fontSize = 14.sp, modifier = Modifier.align(Alignment.Start))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Ui.soft)
+                            .padding(horizontal = 16.dp, vertical = 18.dp)
+                    ) {
+                        Text("No stories right now", color = Ui.muted, fontSize = 14.sp)
+                    }
                 } else {
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -348,46 +394,99 @@ fun UserPageScreen(
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
-                Text("Preferences", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
-                Spacer(Modifier.height(4.dp))
-                PrefRow("Media", onMedia) { GalleryGlyph(Ui.ink) }
-                HorizontalDivider(color = Ui.line)
-                PrefRow("Starred Messages", { soon.show("Starred messages") }) {
-                    Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink)
-                }
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Mute notifications") {
-                    Switch(
-                        checked = muted,
-                        onCheckedChange = { on ->
-                            muted = on
-                            runIo({ Api.mute(conv.id, on) }) { r ->
-                                r.onFailure {
-                                    muted = !on
-                                    msg = it.message
-                                }
-                            }
-                        }
-                    )
-                }
-                HorizontalDivider(color = Ui.line)
-                SettingRow(
-                    if (blocked) "Unblock user" else "Block user",
-                    color = MaterialTheme.colorScheme.error,
-                    onClick = {
-                        if (blocked) {
-                            val id = peer?.id ?: ""
-                            runIo({ Api.block(id, false) }) { r ->
-                                r.onSuccess { blocked = false }.onFailure { msg = it.message }
-                            }
-                        } else {
-                            confirmBlock = true
-                        }
-                    }
+                Spacer(Modifier.height(28.dp))
+                Text(
+                    "Preferences",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .align(Alignment.Start)
+                        .padding(horizontal = 4.dp)
                 )
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Report", color = MaterialTheme.colorScheme.error, onClick = { report = true })
+                Spacer(Modifier.height(10.dp))
+                // Media, Starred and Mute live in one rounded card with the same left edge
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Ui.soft)
+                ) {
+                    PrefRow("Media", onMedia) { GalleryGlyph(Ui.ink) }
+                    HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 54.dp))
+                    PrefRow("Starred Messages", { soon.show("Starred messages") }) {
+                        Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                    }
+                    HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 54.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Notifications, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Text("Mute notifications", fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = muted,
+                            onCheckedChange = { on ->
+                                muted = on
+                                runIo({ Api.mute(conv.id, on) }) { r ->
+                                    r.onFailure {
+                                        muted = !on
+                                        msg = it.message
+                                    }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = UserPageOnYellow,
+                                checkedTrackColor = UserPageYellow,
+                                checkedBorderColor = Color.Transparent,
+                                uncheckedThumbColor = Ui.muted,
+                                uncheckedTrackColor = Ui.bg,
+                                uncheckedBorderColor = Ui.line
+                            )
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                // risky actions get their own card, with red icons
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Ui.soft)
+                ) {
+                    PrefRow(
+                        if (blocked) "Unblock user" else "Block user",
+                        onClick = {
+                            if (blocked) {
+                                val id = peer?.id ?: ""
+                                runIo({ Api.block(id, false) }) { r ->
+                                    r.onSuccess { blocked = false }.onFailure { msg = it.message }
+                                }
+                            } else {
+                                confirmBlock = true
+                            }
+                        },
+                        color = MaterialTheme.colorScheme.error,
+                        chevron = false
+                    ) { BlockGlyph(MaterialTheme.colorScheme.error) }
+                    HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 54.dp))
+                    PrefRow(
+                        "Report",
+                        onClick = { report = true },
+                        color = MaterialTheme.colorScheme.error,
+                        chevron = false
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
                 msg?.let {
                     Spacer(Modifier.height(12.dp))
                     Text(it, color = MaterialTheme.colorScheme.error)
