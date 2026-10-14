@@ -32,6 +32,7 @@ class ConversationState(
     var editing by mutableStateOf<MsgItem?>(null)
 
     private var marked = conv.myRead
+    private var opening = false
     private var typedAt = 0L
 
     fun load() {
@@ -138,7 +139,8 @@ class ConversationState(
         val local = MsgItem(
             Msg(lid, conv.id, me.id, picked.kind, caption.ifBlank { null }, System.currentTimeMillis(), false, cid),
             null, null, rep?.msg?.id, null,
-            Media(picked.name, picked.size, picked.type, picked.w, picked.h, 0L, uri.toString())
+            Media(picked.name, picked.size, picked.type, picked.w, picked.h, 0L, uri.toString()),
+            ttl = ttl
         )
         pending = pending + local
         progress = progress + (lid to 0f)
@@ -155,6 +157,24 @@ class ConversationState(
 
     fun sendEdited(m: EditedMedia) =
         sendMedia(m.uri, if (m.isVideo) "video" else "image", m.caption, m.ttl)
+
+    /** Opens a view-once / timed message: the server records the open, then the viewer is shown. */
+    fun openOnce(x: MsgItem, onReady: (OnceSession) -> Unit) {
+        if (opening) return
+        opening = true
+        runIo({ Features.open(x.msg.id) }) { r ->
+            opening = false
+            r.onSuccess { res ->
+                val at = res.first
+                val remaining = res.second
+                items = items.map { y -> if (y.msg.id == x.msg.id) y.copy(openedAt = at) else y }
+                onReady(OnceSession(x, remaining?.let { System.currentTimeMillis() + it }))
+            }.onFailure {
+                problem = it.message
+                load()
+            }
+        }
+    }
 
     fun react(id: String, emoji: String) {
         val mine = reacts[id]?.firstOrNull { it.first == me.id }?.second
@@ -235,6 +255,16 @@ class ConversationState(
                     val at = j.optLong("edited_at", 0L)
                     items = items.map { y ->
                         if (y.msg.id == id) y.copy(msg = y.msg.copy(body = body), editedAt = at) else y
+                    }
+                }
+            }
+            "opened" -> {
+                if (j.optString("c") == conv.id) {
+                    val id = j.optString("m")
+                    val by = j.optString("u")
+                    val at = j.optLong("at", System.currentTimeMillis())
+                    items = items.map { y ->
+                        if (y.msg.id == id && y.openedAt == null && (by == me.id || y.msg.senderId == me.id)) y.copy(openedAt = at) else y
                     }
                 }
             }
