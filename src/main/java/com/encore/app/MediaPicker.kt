@@ -66,7 +66,9 @@ private const val MAX_PICK = 10
 fun MediaPicker(
     onClose: () -> Unit,
     onEdit: (List<GalleryItem>) -> Unit,
-    onSend: (List<GalleryItem>) -> Unit
+    onSend: (List<GalleryItem>) -> Unit,
+    /** Called when the gallery can't be used (permission refused or unreadable). */
+    onDenied: () -> Unit = {}
 ) {
     BackHandler(onBack = onClose)
     val ctx = LocalContext.current
@@ -79,11 +81,19 @@ fun MediaPicker(
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         access = hasMediaAccess(ctx)
         denied = !access
+        if (denied) onDenied()
     }
 
     LaunchedEffect(access) {
         if (access) {
-            items = withContext(Dispatchers.IO) { queryGallery(ctx) }
+            items = try {
+                withContext(Dispatchers.IO) { queryGallery(ctx) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onDenied()
+                emptyList()
+            }
             loaded = true
         } else {
             askPermission.launch(mediaPermissions())
