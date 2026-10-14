@@ -73,18 +73,28 @@ object Uploads {
     fun inspect(ctx: Context, uri: Uri, wanted: String): Picked {
         var name = "file"
         var size = -1L
-        ctx.contentResolver.query(
-            uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null
-        )?.use { c ->
-            if (c.moveToFirst()) {
-                val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val si = c.getColumnIndex(OpenableColumns.SIZE)
-                if (ni >= 0 && !c.isNull(ni)) name = c.getString(ni)
-                if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+        val type: String
+        if (uri.scheme == "file") {
+            // photos prepared by the media editor live in the app cache
+            val f = java.io.File(uri.path ?: "")
+            name = f.name
+            size = f.length()
+            type = (android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(f.extension.lowercase()) ?: "application/octet-stream").lowercase()
+        } else {
+            ctx.contentResolver.query(
+                uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val si = c.getColumnIndex(OpenableColumns.SIZE)
+                    if (ni >= 0 && !c.isNull(ni)) name = c.getString(ni)
+                    if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+                }
             }
+            type = (ctx.contentResolver.getType(uri) ?: "application/octet-stream").lowercase()
         }
         if (size <= 0) throw ApiException("bad_file", "Can't read this file")
-        val type = (ctx.contentResolver.getType(uri) ?: "application/octet-stream").lowercase()
         val kind = if (wanted == "image" && type !in imageOk) "file" else wanted
         val maxMb = if (kind == "image") 20L else 95L
         if (size > maxMb * 1024 * 1024) throw ApiException("too_large", "File is too large (max $maxMb MB)")
@@ -135,11 +145,15 @@ object Uploads {
         p: Picked,
         clientId: String,
         replyTo: String?,
+        ttl: Int = 0,
+        caption: String? = null,
         onProgress: (Float) -> Unit
     ): MsgItem {
         val q = StringBuilder("/v1/conversations/$cid/media?kind=${p.kind}&name=${Uri.encode(p.name)}&client_id=${Uri.encode(clientId)}")
         if (p.w > 0 && p.h > 0) q.append("&w=${p.w}&h=${p.h}")
         if (replyTo != null) q.append("&reply_to=${Uri.encode(replyTo)}")
+        if (ttl != 0) q.append("&ttl=$ttl")
+        if (!caption.isNullOrBlank()) q.append("&caption=${Uri.encode(caption)}")
         val body = StreamBody(ctx, p.uri, p.type.toMediaTypeOrNull(), p.size, onProgress)
         val req = Request.Builder()
             .url(API_BASE + q)
