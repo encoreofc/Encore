@@ -61,6 +61,9 @@ object CallManager {
     private var callId: String? = null
     private var ice: JSONArray = JSONArray()
 
+    /** id of the call the app is currently handling (null when idle) */
+    val activeCallId: String? get() = callId
+
     @Volatile private var gen = 0
     @Volatile private var pulled = false
 
@@ -135,10 +138,32 @@ object CallManager {
         speaker = false
         seconds = 0
         phase = CallPhase.Ringing
+        appCtx?.let { CallNotification.cancel(it) } // the in-app screen takes over from the notification
         startRing()
         main.postDelayed({
             if (g == gen && phase == CallPhase.Ringing) finish("Missed call")
         }, 60000L)
+    }
+
+    /**
+     * The app was opened from the "incoming call" notification (app was closed or in the background):
+     * the realtime invite was missed, so check the call is still ringing and then show the call screen.
+     */
+    fun incomingFromPush(id: String, peer: String, name: String) {
+        if (phase != CallPhase.Idle || callId == id) return
+        Thread {
+            try {
+                val st = Api.call("GET", "/v1/calls/$id").getJSONObject("call").getString("state")
+                if (st == "ringing") {
+                    ui {
+                        if (phase == CallPhase.Idle) {
+                            incoming(id, JSONObject().put("id", peer).put("display_name", name))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+            }
+        }.start()
     }
 
     fun accept() {
@@ -214,6 +239,7 @@ object CallManager {
         main.removeCallbacksAndMessages(null)
         stopRing()
         stopRingback()
+        appCtx?.let { CallNotification.cancel(it) }
         releaseMedia()
         phase = CallPhase.Idle
         callId = null
