@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 
 private fun Context.findActivity(): Activity? {
     var c: Context = this
@@ -183,6 +184,9 @@ fun ConversationScreen(
     val soon = remember { SoonState() }
     val listState = rememberLazyListState()
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    var gallery by remember { mutableStateOf(false) }
+    var toEdit by remember { mutableStateOf<List<GalleryItem>?>(null) }
 
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -362,6 +366,30 @@ fun ConversationScreen(
         }
 
         SoonToast(soon, 80.dp)
+
+        if (gallery) {
+            MediaPicker(
+                onClose = { gallery = false },
+                onEdit = { picked ->
+                    gallery = false
+                    toEdit = picked
+                },
+                onSend = { picked ->
+                    gallery = false
+                    scope.launch { quickExport(ctx, picked).forEach { st.sendEdited(it) } }
+                }
+            )
+        }
+        toEdit?.let { list ->
+            MediaEditor(
+                items = list,
+                onClose = { toEdit = null },
+                onSend = { out ->
+                    toEdit = null
+                    out.forEach { st.sendEdited(it) }
+                }
+            )
+        }
     }
 
     selected?.let { x ->
@@ -402,7 +430,7 @@ fun ConversationScreen(
         AttachSheet(
             onPhoto = {
                 attach = false
-                pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                gallery = true
             },
             onFile = {
                 attach = false
