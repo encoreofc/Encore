@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                                 askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                             Push.register()
+                            Sync.start()
                         }
                     }
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
                             ChatApp(current) {
                                 val t = Session.token
                                 if (t != null) runIo({ Push.unregister(t); runCatching { Api.logout(t) } }) { }
+                                Sync.wipe()
                                 Session.clear(ctx)
                                 user = null
                             }
