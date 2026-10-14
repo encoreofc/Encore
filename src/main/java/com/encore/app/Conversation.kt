@@ -171,6 +171,9 @@ fun ConversationScreen(
     }
 
     val st = remember(conv.id) { ConversationState(me, conv, ctx.applicationContext, onLogout) }
+    DisposableEffect(st) {
+        onDispose { st.close() }
+    }
     val voice = rememberVoice(st)
     val peer = conv.peer
     val isGroup = conv.type == "group"
