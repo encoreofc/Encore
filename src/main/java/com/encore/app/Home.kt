@@ -31,25 +31,33 @@ fun ChatListScreen(
     onStories: (List<StoryGroup>, Int, Int) -> Unit,
     onAddStory: () -> Unit
 ) {
-    var chats by remember { mutableStateOf<List<Conv>>(emptyList()) }
-    var loaded by remember { mutableStateOf(false) }
+    // the chat list comes from the local database (kept up to date by Sync), so it shows instantly and works offline
+    val chatsFlow = remember { Sync.convFlow() }
+    val chatsState by chatsFlow.collectAsState(initial = null as List<Conv>?)
+    val chats: List<Conv> = chatsState ?: emptyList()
+    val loaded = chatsState != null
     var sheet by remember { mutableStateOf(false) }
     var startDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val soon = remember { SoonState() }
 
     fun refresh() {
+        Sync.kick()
+    }
+
+    // keeps the old behaviour: an expired login sends the user back to the login screen
+    fun checkAuth() {
         runIo({ Api.conversations() }) { r ->
-            r.onSuccess {
-                chats = it
-                loaded = true
-            }.onFailure {
+            r.onFailure {
                 if ((it as? ApiException)?.code == "unauthorized") onLogout()
             }
         }
     }
 
-    Ticker(30000L, me.id) { refresh() }
+    Ticker(30000L, me.id) {
+        refresh()
+        checkAuth()
+    }
 
     OnRealtime { e ->
         when (e.optString("type")) {
