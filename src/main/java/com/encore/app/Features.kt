@@ -26,7 +26,9 @@ data class MsgItem(
     val fwdFrom: String?,
     val replyTo: String?,
     val reply: ReplyInfo?,
-    val media: Media? = null
+    val media: Media? = null,
+    val ttl: Int = 0,
+    val openedAt: Long? = null
 )
 
 data class Synced(val items: List<MsgItem>, val reactions: Map<String, List<Pair<String, String>>>)
@@ -53,7 +55,9 @@ fun parseItem(o: JSONObject): MsgItem {
                 it.optInt("h"),
                 it.optLong("dur")
             )
-        }
+        },
+        ttl = o.optInt("ttl", 0),
+        openedAt = o.optLong("opened_at", 0L).takeIf { it > 0 }
     )
 }
 
@@ -94,5 +98,12 @@ object Features {
 
     fun forward(id: String, cid: String) {
         Api.call("POST", "/v1/messages/$id/forward", JSONObject().put("conversation_id", cid))
+    }
+
+    /** Opens a view-once / timed message. Returns (openedAt, remainingMs or null for view-once). */
+    fun open(id: String): Pair<Long, Long?> {
+        val j = Api.call("POST", "/v1/messages/$id/open")
+        val rem = if (j.isNull("remaining_ms")) null else j.getLong("remaining_ms")
+        return j.getLong("opened_at") to rem
     }
 }
