@@ -51,7 +51,11 @@ class PushService : FirebaseMessagingService() {
                 Sync.kick()
                 showMessage(d["c"] ?: return, d["title"] ?: "Encore", d["body"] ?: "New message")
             }
-            // "call" and "missed_call" come in the calls step
+            "call" -> CallNotification.show(applicationContext, d)
+            "missed_call" -> {
+                CallNotification.cancel(applicationContext)
+                showMessage(d["c"] ?: return, "Missed call", "You missed a call")
+            }
         }
     }
 
