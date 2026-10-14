@@ -42,11 +42,13 @@ internal fun Bubble(
     onQuote: () -> Unit,
     onImage: () -> Unit,
     onFile: () -> Unit,
-    onVideo: () -> Unit
+    onVideo: () -> Unit,
+    onOnce: () -> Unit = {}
 ) {
     val m = item.msg
     val deleted = m.deleted
     val isVoice = !deleted && item.media != null && m.kind == "voice"
+    val isOnce = !deleted && item.media != null && item.ttl != 0 && (m.kind == "image" || m.kind == "video")
     val isVideo = !deleted && item.media != null && m.kind == "video"
     val hasMedia = !deleted && item.media != null && (m.kind == "image" || m.kind == "file")
     val haptic = LocalHapticFeedback.current
@@ -134,6 +136,10 @@ internal fun Bubble(
                 if (isVoice) {
                     Box(modifier = Modifier.align(Alignment.Start)) {
                         VoiceRow(cid, item, progress)
+                    }
+                } else if (isOnce) {
+                    Box(modifier = Modifier.align(Alignment.Start)) {
+                        OnceBlock(item, mine, progress, onOnce)
                     }
                 } else if (isVideo) {
                     Box(modifier = Modifier.align(Alignment.Start)) {
