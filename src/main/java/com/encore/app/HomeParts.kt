@@ -20,7 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 
 private val homeHandler = Handler(Looper.getMainLooper())
@@ -100,28 +103,42 @@ fun Avatar(seed: String, name: String, size: Dp) {
             .background(tone),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            name.take(1).uppercase(),
-            color = Color(0xFF111111),
-            fontWeight = FontWeight.Medium,
-            fontSize = (size.value * 0.4f).sp
-        )
         if (url != null) {
+            // the cache keys do not depend on the login token, so the same picture is reused from memory/disk
+            // every time (no re-fetch, no fade-in). The letter is only drawn until the picture is ready.
             val req = remember(url) {
                 ImageRequest.Builder(ctx)
                     .data(url)
                     .addHeader("Authorization", "Bearer ${Session.token}")
-                    .crossfade(true)
+                    .memoryCacheKey(url)
+                    .diskCacheKey(url)
+                    .crossfade(false)
                     .build()
             }
-            AsyncImage(
-                model = req,
+            val painter = rememberAsyncImagePainter(model = req, contentScale = ContentScale.Crop)
+            if (painter.state !is AsyncImagePainter.State.Success) {
+                Letter(name, size)
+            }
+            Image(
+                painter = painter,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+        } else {
+            Letter(name, size)
         }
     }
+}
+
+@Composable
+private fun Letter(name: String, size: Dp) {
+    Text(
+        name.take(1).uppercase(),
+        color = Color(0xFF111111),
+        fontWeight = FontWeight.Medium,
+        fontSize = (size.value * 0.4f).sp
+    )
 }
 
 @Composable
