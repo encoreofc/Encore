@@ -4,6 +4,10 @@ import android.net.Uri
 import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,6 +50,8 @@ private fun PlayGlyph() {
 @Composable
 fun VideoBlock(item: MsgItem, progress: Float?, onPlay: () -> Unit) {
     val m = item.media
+    val ctx = LocalContext.current
+    val local = m?.localUri
     Box(
         modifier = Modifier
             .width(240.dp)
@@ -55,6 +61,15 @@ fun VideoBlock(item: MsgItem, progress: Float?, onPlay: () -> Unit) {
             .clickable(enabled = progress == null) { onPlay() },
         contentAlignment = Alignment.Center
     ) {
+        if (local != null) {
+            // first frame of the video that is already on the phone
+            AsyncImage(
+                model = ImageRequest.Builder(ctx).data(Uri.parse(local)).crossfade(true).build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         if (progress != null) {
             if (progress > 0f) {
                 CircularProgressIndicator(progress = progress, color = Color.White, modifier = Modifier.size(36.dp))
@@ -86,6 +101,7 @@ fun VideoBlock(item: MsgItem, progress: Float?, onPlay: () -> Unit) {
 @Composable
 fun VideoPlayerDialog(cid: String, item: MsgItem, onClose: () -> Unit) {
     val url = Uploads.url(cid, item.msg.id)
+    val local = item.media?.localUri
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
             modifier = Modifier
@@ -98,7 +114,9 @@ fun VideoPlayerDialog(cid: String, item: MsgItem, onClose: () -> Unit) {
                         val mc = MediaController(ctx)
                         mc.setAnchorView(this)
                         setMediaController(mc)
-                        setVideoURI(Uri.parse(url), mapOf("Authorization" to "Bearer ${Session.token}"))
+                        // a downloaded copy plays instantly and offline; otherwise stream it
+                        if (local != null) setVideoURI(Uri.parse(local))
+                        else setVideoURI(Uri.parse(url), mapOf("Authorization" to "Bearer ${Session.token}"))
                         setOnPreparedListener { it.start() }
                         setOnErrorListener { _, _, _ ->
                             Toast.makeText(ctx, "Can't play this video", Toast.LENGTH_SHORT).show()
