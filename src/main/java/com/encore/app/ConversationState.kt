@@ -125,7 +125,7 @@ class ConversationState(
         }
     }
 
-    fun sendMedia(uri: Uri, wanted: String) {
+    fun sendMedia(uri: Uri, wanted: String, caption: String = "", ttl: Int = 0) {
         val picked = try {
             Uploads.inspect(appCtx, uri, wanted)
         } catch (e: Exception) {
@@ -136,7 +136,7 @@ class ConversationState(
         val lid = "local-$cid"
         val rep = replyTo
         val local = MsgItem(
-            Msg(lid, conv.id, me.id, picked.kind, null, System.currentTimeMillis(), false, cid),
+            Msg(lid, conv.id, me.id, picked.kind, caption.ifBlank { null }, System.currentTimeMillis(), false, cid),
             null, null, rep?.msg?.id, null,
             Media(picked.name, picked.size, picked.type, picked.w, picked.h, 0L, uri.toString())
         )
@@ -145,13 +145,16 @@ class ConversationState(
         replyTo = null
         problem = null
         runIo({
-            Uploads.upload(appCtx, conv.id, picked, cid, rep?.msg?.id) { p -> progress = progress + (lid to p) }
+            Uploads.upload(appCtx, conv.id, picked, cid, rep?.msg?.id, ttl, caption) { p -> progress = progress + (lid to p) }
         }) { r ->
             pending = pending.filter { it.msg.clientId != cid }
             progress = progress - lid
             r.onSuccess { m -> items = addItem(items, m) }.onFailure { problem = it.message }
         }
     }
+
+    fun sendEdited(m: EditedMedia) =
+        sendMedia(m.uri, if (m.isVideo) "video" else "image", m.caption, m.ttl)
 
     fun react(id: String, emoji: String) {
         val mine = reacts[id]?.firstOrNull { it.first == me.id }?.second
