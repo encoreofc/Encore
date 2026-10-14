@@ -13,10 +13,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+private val BadgeYellow = Color(0xFFFFC400)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,8 +83,8 @@ fun ChatListScreen(
             ) {
                 Text(
                     "Encore",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onSearch) {
@@ -97,7 +100,7 @@ fun ChatListScreen(
                     .padding(start = 20.dp, end = 8.dp, top = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Chats", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("Chats", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Ui.muted, modifier = Modifier.weight(1f))
                 Box {
                     IconButton(onClick = { menu = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink)
@@ -134,12 +137,12 @@ fun ChatListScreen(
                     val p = c.peer
                     val name = p?.displayName ?: "Unknown"
                     val last = c.last
+                    val mineLast = last != null && !last.deleted && last.kind != "system" && last.senderId == me.id
                     val preview = when {
                         last == null -> "Say hello"
                         last.deleted -> "Message deleted"
                         last.kind == "system" -> last.preview ?: ""
-                        last.preview != null -> (if (last.senderId == me.id) "You: " else "") + last.preview
-                        else -> (if (last.senderId == me.id) "You: " else "") + kindLabel(last.kind)
+                        else -> last.preview ?: kindLabel(last.kind)
                     }
                     Row(
                         modifier = Modifier
@@ -148,40 +151,54 @@ fun ChatListScreen(
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(p?.id ?: c.id, name, 52.dp)
-                        Spacer(Modifier.width(14.dp))
+                        Avatar(p?.id ?: c.id, name, 48.dp)
+                        Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 name,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
-                                maxLines = 1
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                preview,
-                                color = if (c.unread > 0) Ui.ink else Ui.muted,
-                                fontWeight = if (c.unread > 0) FontWeight.Medium else FontWeight.Normal,
-                                fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Spacer(Modifier.height(3.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (mineLast) {
+                                    Icon(
+                                        Icons.Default.Done,
+                                        contentDescription = null,
+                                        tint = Ui.muted,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    preview,
+                                    color = if (c.unread > 0) Ui.ink else Ui.muted,
+                                    fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                         Spacer(Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = 12.sp)
+                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = 11.sp)
                             if (c.unread > 0) {
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(5.dp))
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (c.muted) Ui.muted else Ui.ink)
-                                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                                        .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                                        .clip(CircleShape)
+                                        .background(if (c.muted) Ui.muted else BadgeYellow)
+                                        .padding(horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
-                                        color = Ui.onInk,
-                                        fontSize = 12.sp,
+                                        color = if (c.muted) Ui.onInk else Color(0xFF111111),
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
