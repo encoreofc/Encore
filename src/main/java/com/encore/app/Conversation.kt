@@ -370,6 +370,11 @@ fun ConversationScreen(
         if (gallery) {
             MediaPicker(
                 onClose = { gallery = false },
+                onDenied = {
+                    // No gallery permission: fall back to the system photo picker (needs none)
+                    gallery = false
+                    pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                },
                 onEdit = { picked ->
                     gallery = false
                     toEdit = picked
