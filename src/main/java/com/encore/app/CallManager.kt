@@ -1,0 +1,446 @@
+package com.encore.app
+
+import android.content.Context
+import android.media.AudioManager
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import org.json.JSONArray
+import org.json.JSONObject
+import org.webrtc.AudioSource
+import org.webrtc.AudioTrack
+import org.webrtc.DataChannel
+import org.webrtc.IceCandidate
+import org.webrtc.MediaConstraints
+import org.webrtc.MediaStream
+import org.webrtc.PeerConnection
+import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpReceiver
+import org.webrtc.RtpTransceiver
+import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+enum class CallPhase { Idle, Calling, Ringing, Connecting, Active }
+
+object CallManager {
+    var phase by mutableStateOf(CallPhase.Idle)
+        private set
+    var peerId by mutableStateOf("")
+        private set
+    var peerName by mutableStateOf("")
+        private set
+    var muted by mutableStateOf(false)
+        private set
+    var speaker by mutableStateOf(false)
+        private set
+    var seconds by mutableStateOf(0)
+        private set
+
+    private val main = Handler(Looper.getMainLooper())
+    private var appCtx: Context? = null
+    private var factory: PeerConnectionFactory? = null
+    private var pc: PeerConnection? = null
+    private var audioSource: AudioSource? = null
+    private var audioTrack: AudioTrack? = null
+    private var ringtone: Ringtone? = null
+    private var callId: String? = null
+    private var ice: JSONArray = JSONArray()
+
+    @Volatile private var gen = 0
+    @Volatile private var pulled = false
+
+    fun init(ctx: Context) {
+        appCtx = ctx.applicationContext
+    }
+
+    private fun ui(block: () -> Unit) {
+        main.post { block() }
+    }
+
+    private fun toast(t: String?) {
+        val c = appCtx ?: return
+        if (!t.isNullOrBlank()) Toast.makeText(c, t, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun sendEnd(id: String, action: String) {
+        Thread { runCatching { Api.call("POST", "/v1/calls/$id/$action") } }.start()
+    }
+
+    /* ---------- outgoing ---------- */
+
+    fun start(cid: String, peer: String, name: String) {
+        if (phase != CallPhase.Idle) {
+            toast("You are already in a call")
+            return
+        }
+        val g = ++gen
+        callId = null
+        pulled = false
+        peerId = peer
+        peerName = name
+        muted = false
+        speaker = false
+        seconds = 0
+        phase = CallPhase.Calling
+        Thread {
+            try {
+                val r = Api.call("POST", "/v1/calls", JSONObject().put("conversation_id", cid))
+                val id = r.getJSONObject("call").getString("id")
+                val servers = r.optJSONArray("ice_servers") ?: JSONArray()
+                ui {
+                    if (g == gen) {
+                        callId = id
+                        ice = servers
+                        main.postDelayed({
+                            if (g == gen && phase == CallPhase.Calling) {
+                                toast("No answer")
+                                hangup()
+                            }
+                        }, 45000L)
+                    } else {
+                        sendEnd(id, "end")
+                    }
+                }
+            } catch (e: Exception) {
+                ui { if (g == gen) finish(e.message ?: "Call failed") }
+            }
+        }.start()
+    }
+
+    /* ---------- incoming ---------- */
+
+    private fun incoming(id: String, from: JSONObject?) {
+        val g = ++gen
+        callId = id
+        pulled = false
+        peerId = from?.optString("id") ?: ""
+        peerName = from?.optString("display_name") ?: "Unknown"
+        muted = false
+        speaker = false
+        seconds = 0
+        phase = CallPhase.Ringing
+        startRing()
+        main.postDelayed({
+            if (g == gen && phase == CallPhase.Ringing) finish("Missed call")
+        }, 60000L)
+    }
+
+    fun accept() {
+        val id = callId ?: return
+        if (phase != CallPhase.Ringing) return
+        val g = gen
+        phase = CallPhase.Connecting
+        stopRing()
+        Thread {
+            try {
+                val r = Api.call("POST", "/v1/calls/$id/accept")
+                val servers = r.optJSONArray("ice_servers") ?: JSONArray()
+                ui { if (g == gen) startPing(g, id) }
+                connectMedia(id, servers, g)
+            } catch (e: Exception) {
+                ui { if (g == gen) finish(e.message ?: "Call failed") }
+            }
+        }.start()
+    }
+
+    /** Decline while ringing, or hang up in any other state. */
+    fun hangup() {
+        val id = callId
+        if (id != null) sendEnd(id, if (phase == CallPhase.Ringing) "reject" else "end")
+        finish(null)
+    }
+
+    fun toggleMute() {
+        muted = !muted
+        audioTrack?.setEnabled(!muted)
+    }
+
+    fun toggleSpeaker() {
+        speaker = !speaker
+        (appCtx?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.isSpeakerphoneOn = speaker
+    }
+
+    /* ---------- realtime events (main thread) ---------- */
+
+    fun onEvent(j: JSONObject) {
+        if (j.optString("type") != "call") return
+        val id = j.optString("call_id")
+        when (j.optString("ev")) {
+            "invite" -> if (phase == CallPhase.Idle) incoming(id, j.optJSONObject("from"))
+            "accepted" -> if (id == callId) {
+                if (phase == CallPhase.Calling) {
+                    val g = gen
+                    phase = CallPhase.Connecting
+                    startPing(g, id)
+                    connectMedia(id, ice, g)
+                } else if (phase == CallPhase.Ringing && j.optString("by") == Session.user?.id) {
+                    finish(null) // answered on another device
+                }
+            }
+            "ended" -> if (id == callId) {
+                val outgoing = j.optString("by") != peerId
+                finish(
+                    when (j.optString("state")) {
+                        "rejected" -> if (outgoing) "Call declined" else null
+                        "missed" -> if (phase == CallPhase.Ringing) "Missed call" else "No answer"
+                        else -> "Call ended"
+                    }
+                )
+            }
+        }
+    }
+
+    /* ---------- finish ---------- */
+
+    private fun finish(note: String?) {
+        gen++
+        main.removeCallbacksAndMessages(null)
+        stopRing()
+        releaseMedia()
+        phase = CallPhase.Idle
+        callId = null
+        pulled = false
+        seconds = 0
+        toast(note)
+    }
+
+    private fun releaseMedia() {
+        try { pc?.close() } catch (e: Exception) {}
+        try { pc?.dispose() } catch (e: Exception) {}
+        pc = null
+        try { audioTrack?.dispose() } catch (e: Exception) {}
+        try { audioSource?.dispose() } catch (e: Exception) {}
+        audioTrack = null
+        audioSource = null
+        val am = appCtx?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (am != null) {
+            am.isSpeakerphoneOn = false
+            am.mode = AudioManager.MODE_NORMAL
+        }
+    }
+
+    private fun startRing() {
+        val c = appCtx ?: return
+        try {
+            val r = RingtoneManager.getRingtone(c, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+            if (Build.VERSION.SDK_INT >= 28) r.isLooping = true
+            r.play()
+            ringtone = r
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun stopRing() {
+        try { ringtone?.stop() } catch (e: Exception) {}
+        ringtone = null
+    }
+
+    private fun startTimer(g: Int) {
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (g != gen || phase != CallPhase.Active) return
+                seconds++
+                main.postDelayed(this, 1000L)
+            }
+        }, 1000L)
+    }
+
+    private fun startPing(g: Int, id: String) {
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (g != gen) return
+                Thread {
+                    try {
+                        val st = Api.call("POST", "/v1/calls/$id/ping").getJSONObject("call").getString("state")
+                        if (st != "active" && st != "ringing") ui { if (g == gen) finish("Call ended") }
+                    } catch (e: Exception) {
+                    }
+                }.start()
+                main.postDelayed(this, 15000L)
+            }
+        }, 15000L)
+    }
+
+    /* ---------- WebRTC + Cloudflare SFU ---------- */
+
+    private fun factory(): PeerConnectionFactory {
+        factory?.let { return it }
+        PeerConnectionFactory.initialize(
+            PeerConnectionFactory.InitializationOptions.builder(appCtx).createInitializationOptions()
+        )
+        val f = PeerConnectionFactory.builder().createPeerConnectionFactory()
+        factory = f
+        return f
+    }
+
+    private fun parseIce(a: JSONArray): List<PeerConnection.IceServer> {
+        val out = ArrayList<PeerConnection.IceServer>()
+        for (i in 0 until a.length()) {
+            val o = a.getJSONObject(i)
+            val raw = o.opt("urls")
+            val urls = ArrayList<String>()
+            if (raw is JSONArray) {
+                for (k in 0 until raw.length()) urls.add(raw.getString(k))
+            } else if (raw is String) {
+                urls.add(raw)
+            }
+            if (urls.isEmpty()) continue
+            val b = PeerConnection.IceServer.builder(urls)
+            if (o.has("username")) b.setUsername(o.getString("username"))
+            if (o.has("credential")) b.setPassword(o.getString("credential"))
+            out.add(b.createIceServer())
+        }
+        return out
+    }
+
+    private fun createSdp(pc: PeerConnection, offer: Boolean): SessionDescription {
+        val latch = CountDownLatch(1)
+        var res: SessionDescription? = null
+        var err: String? = null
+        val o = object : SdpObserver {
+            override fun onCreateSuccess(d: SessionDescription?) { res = d; latch.countDown() }
+            override fun onCreateFailure(e: String?) { err = e; latch.countDown() }
+            override fun onSetSuccess() {}
+            override fun onSetFailure(e: String?) {}
+        }
+        if (offer) pc.createOffer(o, MediaConstraints()) else pc.createAnswer(o, MediaConstraints())
+        latch.await(10, TimeUnit.SECONDS)
+        return res ?: throw ApiException("webrtc", err ?: "Could not prepare the call")
+    }
+
+    private fun setSdp(pc: PeerConnection, d: SessionDescription, local: Boolean) {
+        val latch = CountDownLatch(1)
+        var err: String? = null
+        val o = object : SdpObserver {
+            override fun onCreateSuccess(x: SessionDescription?) {}
+            override fun onCreateFailure(e: String?) {}
+            override fun onSetSuccess() { latch.countDown() }
+            override fun onSetFailure(e: String?) { err = e; latch.countDown() }
+        }
+        if (local) pc.setLocalDescription(o, d) else pc.setRemoteDescription(o, d)
+        if (!latch.await(10, TimeUnit.SECONDS)) throw ApiException("webrtc", "Call setup timed out")
+        err?.let { throw ApiException("webrtc", it) }
+    }
+
+    private fun connectMedia(id: String, iceJson: JSONArray, g: Int) {
+        Thread {
+            try {
+                val am = appCtx?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                am?.mode = AudioManager.MODE_IN_COMMUNICATION
+                am?.isSpeakerphoneOn = false
+
+                val f = factory()
+                val cfg = PeerConnection.RTCConfiguration(parseIce(iceJson)).apply {
+                    sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                    bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+                    rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+                }
+                val observer: PeerConnection.Observer = object : PeerConnection.Observer {
+                    override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
+                    override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
+                        when (s) {
+                            PeerConnection.IceConnectionState.CONNECTED,
+                            PeerConnection.IceConnectionState.COMPLETED -> ui {
+                                if (g == gen && phase == CallPhase.Connecting) {
+                                    phase = CallPhase.Active
+                                    startTimer(g)
+                                }
+                            }
+                            PeerConnection.IceConnectionState.FAILED -> ui {
+                                if (g == gen) {
+                                    callId?.let { sendEnd(it, "end") }
+                                    finish("Connection lost")
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                    override fun onIceConnectionReceivingChange(b: Boolean) {}
+                    override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
+                    override fun onIceCandidate(c: IceCandidate?) {}
+                    override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
+                    override fun onAddStream(s: MediaStream?) {}
+                    override fun onRemoveStream(s: MediaStream?) {}
+                    override fun onDataChannel(d: DataChannel?) {}
+                    override fun onRenegotiationNeeded() {}
+                    override fun onAddTrack(r: RtpReceiver?, s: Array<out MediaStream>?) {}
+                }
+                val conn = f.createPeerConnection(cfg, observer)
+                    ?: throw ApiException("webrtc", "Could not start the call")
+                if (g != gen) { conn.close(); return@Thread }
+                pc = conn
+
+                val src = f.createAudioSource(MediaConstraints())
+                val track = f.createAudioTrack("mic", src)
+                track.setEnabled(!muted)
+                audioSource = src
+                audioTrack = track
+                val tr = conn.addTransceiver(
+                    track,
+                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                )
+
+                Api.call("POST", "/v1/calls/$id/sfu/session")
+                val offer = createSdp(conn, true)
+                setSdp(conn, offer, true)
+                val mid = tr.mid ?: throw ApiException("webrtc", "Could not prepare the call")
+                val body = JSONObject()
+                    .put("sessionDescription", JSONObject().put("type", "offer").put("sdp", offer.description))
+                    .put("tracks", JSONArray().put(JSONObject().put("location", "local").put("mid", mid).put("trackName", "mic")))
+                val res = Api.call("POST", "/v1/calls/$id/sfu/tracks", body)
+                if (g != gen) return@Thread
+                val answer = res.getJSONObject("sessionDescription")
+                setSdp(conn, SessionDescription(SessionDescription.Type.ANSWER, answer.getString("sdp")), false)
+
+                // pull the other person's microphone; it may not be published yet, so retry for a while
+                for (i in 0 until 30) {
+                    if (g != gen) return@Thread
+                    if (pullOnce(id, conn)) break
+                    Thread.sleep(1000)
+                }
+            } catch (e: Exception) {
+                ui {
+                    if (g == gen) {
+                        callId?.let { sendEnd(it, "end") }
+                        finish(e.message ?: "Call failed")
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun pullOnce(id: String, conn: PeerConnection): Boolean {
+        if (pulled) return true
+        val c = Api.call("GET", "/v1/calls/$id").getJSONObject("call")
+        if (c.getString("state") != "active") return false
+        if (c.isNull("peer_session")) return false
+        val ps = c.getString("peer_session")
+        val body = JSONObject().put(
+            "tracks",
+            JSONArray().put(JSONObject().put("location", "remote").put("sessionId", ps).put("trackName", "mic"))
+        )
+        val res = Api.call("POST", "/v1/calls/$id/sfu/tracks", body)
+        val t0 = res.optJSONArray("tracks")?.optJSONObject(0)
+        if (t0 != null && t0.has("errorCode")) return false
+        if (res.optBoolean("requiresImmediateRenegotiation")) {
+            val sd = res.getJSONObject("sessionDescription")
+            setSdp(conn, SessionDescription(SessionDescription.Type.OFFER, sd.getString("sdp")), false)
+            val ans = createSdp(conn, false)
+            setSdp(conn, ans, true)
+            Api.call(
+                "PUT", "/v1/calls/$id/sfu/renegotiate",
+                JSONObject().put("sessionDescription", JSONObject().put("type", "answer").put("sdp", ans.description))
+            )
+        }
+        pulled = true
+        return true
+    }
+}
