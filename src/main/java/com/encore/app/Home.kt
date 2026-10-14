@@ -30,6 +30,7 @@ fun ChatListScreen(
     onProfile: () -> Unit,
     onNewGroup: () -> Unit,
     onSearch: () -> Unit,
+    onBots: () -> Unit,
     onSettings: () -> Unit,
     onStories: (List<StoryGroup>, Int, Int) -> Unit,
     onAddStory: () -> Unit
@@ -255,6 +256,10 @@ fun ChatListScreen(
             SheetRow(Icons.Default.Face, "New Group", "Chat with several people at once") {
                 sheet = false
                 onNewGroup()
+            }
+            SheetRow(Icons.Default.Build, "Bots", "Find bots and make stickers") {
+                sheet = false
+                onBots()
             }
             SheetRow(Icons.Default.AccountCircle, "New Contact", "Add a contact to be able to send messages") {
                 sheet = false
