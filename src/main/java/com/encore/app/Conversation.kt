@@ -76,12 +76,16 @@ private fun ConversationHeader(
             Avatar(peer?.id ?: convId, peer?.displayName ?: "?", 40.dp)
             Spacer(Modifier.width(10.dp))
             Column {
-                Text(
-                    peer?.displayName ?: "Unknown",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        peer?.displayName ?: "Unknown",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Badge(peer?.id, name = peer?.displayName)
+                }
                 if (subtitle.isNotEmpty()) {
                     Text(subtitle, fontSize = 12.sp, color = if (typing) Ui.ink else Ui.muted)
                 }
