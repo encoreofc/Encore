@@ -96,7 +96,11 @@ private fun ppFetchPhotos(userId: String, currentUrl: String): List<ProfilePhoto
 
 object PhotoSaver {
     /** Downloads one photo and files it in Pictures/Encore or Download/Encore. Call off the main thread. */
-    fun save(ctx: Context, url: String, baseName: String, toGallery: Boolean) {
+    fun save(ctx: Context, url: String, baseName: String, toGallery: Boolean, video: Boolean = false) {
+        if (video) {
+            saveVideo(ctx, url, baseName, toGallery)
+            return
+        }
         val got = download(url)
         val type = got.second
         val ext = when (type) {
@@ -113,6 +117,80 @@ object PhotoSaver {
             throw e
         } catch (e: Exception) {
             throw ApiException("save_failed", "Couldn't save the photo. Check storage access and try again.")
+        }
+    }
+
+    /** Videos are streamed straight to storage (never held in memory): Movies/Encore or Download/Encore. */
+    private fun saveVideo(ctx: Context, url: String, baseName: String, toGallery: Boolean) {
+        try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
+            conn.setRequestProperty("Authorization", "Bearer ${Session.token}")
+            try {
+                if (conn.responseCode !in 200..299) {
+                    throw ApiException("http_${conn.responseCode}", "Couldn't download the video")
+                }
+                val raw = (conn.contentType ?: "video/mp4").substringBefore(';').trim().lowercase()
+                val type = if (raw.startsWith("video/")) raw else "video/mp4"
+                val ext = when (type) {
+                    "video/webm" -> "webm"
+                    "video/3gpp" -> "3gp"
+                    "video/quicktime" -> "mov"
+                    else -> "mp4"
+                }
+                conn.inputStream.use { input ->
+                    try {
+                        writeStream(ctx, input, "$baseName.$ext", type, toGallery)
+                    } catch (e: ApiException) {
+                        throw e
+                    } catch (e: Exception) {
+                        throw ApiException("save_failed", "Couldn't save the video. Check storage access and try again.")
+                    }
+                }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: ApiException) {
+            throw e
+        } catch (e: java.io.IOException) {
+            throw ApiException("network", "Can't reach the server. Check your connection.")
+        }
+    }
+
+    private fun writeStream(ctx: Context, input: java.io.InputStream, name: String, type: String, toGallery: Boolean) {
+        val folder = if (toGallery) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_DOWNLOADS
+        if (Build.VERSION.SDK_INT >= 29) {
+            val resolver = ctx.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, type)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/Encore")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val collection = if (toGallery) {
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else {
+                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            }
+            val uri = resolver.insert(collection, values)
+                ?: throw ApiException("save_failed", "Couldn't save the video")
+            try {
+                val out = resolver.openOutputStream(uri) ?: throw ApiException("save_failed", "Couldn't save the video")
+                out.use { input.copyTo(it) }
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+        } else {
+            val dir = File(Environment.getExternalStoragePublicDirectory(folder), "Encore")
+            dir.mkdirs()
+            val file = File(dir, name)
+            file.outputStream().use { input.copyTo(it) }
+            MediaScannerConnection.scanFile(ctx, arrayOf(file.absolutePath), arrayOf(type), null)
         }
     }
 
