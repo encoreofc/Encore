@@ -364,7 +364,7 @@ private object StickerImages {
 }
 
 @Composable
-private fun StickerView(id: String, kind: String, modifier: Modifier = Modifier) {
+internal fun StickerView(id: String, kind: String, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     if (kind == "video") {
         var path by remember(id) { mutableStateOf<String?>(null) }
