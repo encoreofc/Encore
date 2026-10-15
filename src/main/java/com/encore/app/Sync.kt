@@ -223,7 +223,7 @@ object Sync {
                 } else {
                     dao.touchConv(
                         m.conversationId, m.senderId, m.kind,
-                        if (m.deleted || item.ttl != 0) null else m.body,
+                        if (m.deleted || item.ttl != 0) null else if (m.kind == "sticker") "Sticker" else m.body,
                         m.createdAt, m.deleted,
                         if (m.senderId != me && m.kind != "system") 1 else 0
                     )
