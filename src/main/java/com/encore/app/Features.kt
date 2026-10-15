@@ -84,6 +84,13 @@ object Features {
         return parseItem(Api.call("POST", "/v1/conversations/$cid/messages", b).getJSONObject("message"))
     }
 
+    /** a sticker message: kind = "sticker", body on the server = the sticker id */
+    fun sendSticker(cid: String, stickerId: String, clientId: String, replyTo: String?): MsgItem {
+        val b = JSONObject().put("kind", "sticker").put("sticker_id", stickerId).put("client_id", clientId)
+        if (replyTo != null) b.put("reply_to", replyTo)
+        return parseItem(Api.call("POST", "/v1/conversations/$cid/messages", b).getJSONObject("message"))
+    }
+
     fun react(id: String, emoji: String) {
         Api.call("PUT", "/v1/messages/$id/reaction", JSONObject().put("emoji", emoji))
     }
