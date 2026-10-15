@@ -7,9 +7,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,7 +41,12 @@ import org.json.JSONObject
 /** The server sends this for verified people who have no sticker badge. */
 const val STAR_BADGE = "\u2B50"
 
-class StickerBadge(val id: String, val kind: String)
+/** A sticker worn as a badge. until = when it ends (ms), null = no end. */
+class StickerBadge(val id: String, val kind: String, val until: Long? = null)
+
+// a badge whose time ran out counts as gone, the star comes back
+private fun StickerBadge?.activeNow(): StickerBadge? =
+    this?.takeIf { it.until == null || it.until > System.currentTimeMillis() }
 
 /* ------------------------------------------------------------------ */
 /* store: user id -> badge, only verified people are in here           */
@@ -48,13 +55,17 @@ class StickerBadge(val id: String, val kind: String)
 object BadgeStore {
     val map = mutableStateMapOf<String, String>()
     val stickers = mutableStateMapOf<String, StickerBadge>()
-    private val asked = HashSet<String>()
+    private val asked = HashMap<String, Long>()
     private val pending = LinkedHashSet<String>()
     private val handler = Handler(Looper.getMainLooper())
     private var scheduled = false
+    private const val FRESH_MS = 5 * 60 * 1000L
 
+    // a name that scrolls into view asks again only when the last answer is a few minutes old
     fun want(id: String) {
-        if (id.isBlank() || id in asked || id in pending) return
+        if (id.isBlank() || id in pending) return
+        val t = asked[id]
+        if (t != null && System.currentTimeMillis() - t < FRESH_MS) return
         pending.add(id)
         schedule()
     }
@@ -71,19 +82,43 @@ object BadgeStore {
         val batch = pending.take(50)
         if (batch.isEmpty()) return
         pending.removeAll(batch.toSet())
-        asked.addAll(batch)
+        val now = System.currentTimeMillis()
+        batch.forEach { asked[it] = now }
         runIo({ Api.call("GET", "/v1/badges?ids=" + batch.joinToString(",")) }) { r ->
             r.onSuccess { j ->
                 val o = j.optJSONObject("badges")
                 val s = j.optJSONObject("stickers")
-                if (o != null) for (k in o.keys()) map[k] = o.getString(k)
                 for (id in batch) {
+                    if (o != null && o.has(id)) map[id] = o.getString(id) else map.remove(id)
                     val sb = s?.optJSONObject(id)
-                    if (sb != null) stickers[id] = StickerBadge(sb.getString("id"), sb.getString("kind"))
-                    else stickers.remove(id)
+                    if (sb != null) {
+                        stickers[id] = StickerBadge(
+                            sb.getString("id"),
+                            sb.getString("kind"),
+                            if (sb.isNull("until")) null else sb.optLong("until")
+                        )
+                    } else {
+                        stickers.remove(id)
+                    }
                 }
-            }.onFailure { asked.removeAll(batch.toSet()) }
+            }.onFailure { batch.forEach { asked.remove(it) } }
             if (pending.isNotEmpty()) schedule()
+        }
+    }
+
+    /** A "badge" realtime event from the server (my badge changed on another device). */
+    fun apply(e: JSONObject) {
+        val uid = e.optString("user_id")
+        if (uid.isBlank()) return
+        val st = e.optJSONObject("sticker")
+        if (st != null) {
+            stickers[uid] = StickerBadge(
+                st.getString("id"),
+                st.getString("kind"),
+                if (e.isNull("until")) null else e.optLong("until")
+            )
+        } else {
+            stickers.remove(uid)
         }
     }
 }
@@ -142,7 +177,7 @@ fun StarGlyph(dim: Dp, shimmer: Boolean = true) {
     }
 }
 
-/** A sticker badge if the person picked one, otherwise the animated star. */
+/** A sticker badge if the person wears one, otherwise the animated star. */
 @Composable
 fun BadgeGlyph(e: String, dim: Dp, shimmer: Boolean = true, sticker: StickerBadge? = null) {
     if (sticker != null && sticker.kind != "video") {
@@ -160,7 +195,7 @@ fun BadgeGlyph(e: String, dim: Dp, shimmer: Boolean = true, sticker: StickerBadg
 @Composable
 fun BadgeOf(userId: String, dim: Dp, shimmer: Boolean = true) {
     val e = BadgeStore.map[userId] ?: STAR_BADGE
-    BadgeGlyph(e, dim, shimmer, BadgeStore.stickers[userId])
+    BadgeGlyph(e, dim, shimmer, BadgeStore.stickers[userId].activeNow())
 }
 
 private class Spark(val x: Float, val y: Float, val s: Float, val phase: Float)
@@ -210,7 +245,7 @@ fun Badge(userId: String?, size: TextUnit = 14.sp, name: String? = null) {
     if (userId.isNullOrBlank()) return
     LaunchedEffect(userId) { BadgeStore.want(userId) }
     val e = BadgeStore.map[userId] ?: return
-    val sticker = BadgeStore.stickers[userId]
+    val sticker = BadgeStore.stickers[userId].activeNow()
     var open by remember(userId) { mutableStateOf(false) }
     val dim = with(LocalDensity.current) { size.toDp() } * 1.2f
     Spacer(Modifier.width(5.dp))
@@ -267,38 +302,178 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
 }
 
 /* ------------------------------------------------------------------ */
-/* picker: the star first, then your own and saved stickers            */
+/* picker (opened from Settings, verified accounts only)               */
 /* ------------------------------------------------------------------ */
+
+private val BadgeDurations = listOf(
+    "1 hour" to 3600,
+    "8 hours" to 28800,
+    "1 day" to 86400,
+    "1 week" to 604800,
+    "1 month" to 2592000
+)
+
+private fun parseSticker(o: JSONObject) = Sticker(
+    o.getString("id"),
+    o.getString("kind"),
+    o.optString("mime"),
+    o.optInt("w"),
+    o.optInt("h"),
+    if (o.isNull("dur")) null else o.optInt("dur"),
+    o.optBoolean("mine"),
+    o.optBoolean("public"),
+    o.optBoolean("saved")
+)
+
+private fun fetchStickers(path: String): List<Sticker> {
+    val a = Api.call("GET", path).getJSONArray("stickers")
+    return List(a.length()) { parseSticker(a.getJSONObject(it)) }
+}
+
+private fun leftLabel(ms: Long): String {
+    val m = ms / 60000
+    return when {
+        m < 60 -> maxOf(m, 1L).toString() + " min"
+        m < 60 * 24 -> (m / 60).toString() + " h"
+        else -> (m / (60 * 24)).toString() + " d"
+    }
+}
+
+@Composable
+private fun PickerLabel(text: String, action: String? = null, onAction: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 14.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text.uppercase(),
+            fontSize = 12.sp,
+            letterSpacing = 1.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Ui.muted,
+            modifier = Modifier.weight(1f)
+        )
+        if (action != null) {
+            Text(
+                action,
+                fontSize = 13.sp,
+                color = Ui.muted,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BadgeCell(
+    s: Sticker?,
+    on: Boolean,
+    enabled: Boolean,
+    modifier: Modifier,
+    onTap: () -> Unit,
+    onHold: (() -> Unit)?
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(shape)
+            .background(if (on) Ui.soft else Color.Transparent)
+            .then(if (on) Modifier.border(1.5.dp, Ui.ink, shape) else Modifier)
+            .combinedClickable(enabled = enabled, onClick = onTap, onLongClick = onHold),
+        contentAlignment = Alignment.Center
+    ) {
+        if (s == null) StarGlyph(34.dp, shimmer = false)
+        else StickerView(s.id, s.kind, Modifier.fillMaxSize().padding(8.dp))
+    }
+}
+
+// s == null is the default star
+@Composable
+private fun BadgeGrid(
+    cells: List<Sticker?>,
+    currentId: String?,
+    busy: Boolean,
+    onPick: (Sticker?) -> Unit,
+    onHold: (Sticker) -> Unit
+) {
+    cells.chunked(6).forEach { row ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            row.forEach { s ->
+                val on = if (s == null) currentId == null else s.id == currentId
+                BadgeCell(
+                    s,
+                    on,
+                    !busy,
+                    Modifier.weight(1f),
+                    { onPick(s) },
+                    if (s == null) null else ({ onHold(s) })
+                )
+            }
+            repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BadgePickerDialog(myId: String, onDismiss: () -> Unit) {
-    val currentId = BadgeStore.stickers[myId]?.id
-    var list by remember { mutableStateOf<List<Sticker>?>(null) }
+    val current = BadgeStore.stickers[myId].activeNow()
+    var recent by remember { mutableStateOf<List<Sticker>?>(null) }
+    var featured by remember { mutableStateOf<List<Sticker>?>(null) }
+    var mine by remember { mutableStateOf<List<Sticker>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
+    var holding by remember { mutableStateOf<Sticker?>(null) }
 
     LaunchedEffect(Unit) {
+        runIo({ fetchStickers("/v1/me/badge/recent") }) { r ->
+            r.onSuccess { recent = it }.onFailure { recent = emptyList() }
+        }
+        runIo({ fetchStickers("/v1/badges/featured") }) { r ->
+            r.onSuccess { featured = it }.onFailure { featured = emptyList() }
+        }
         runIo({
             (BotApi.stickers("mine") + BotApi.stickers("saved"))
                 .filter { it.kind != "video" }
                 .distinctBy { it.id }
         }) { r ->
-            r.onSuccess { list = it }.onFailure { problem = it.message }
+            r.onSuccess { mine = it }.onFailure {
+                mine = emptyList()
+                problem = it.message
+            }
         }
     }
 
-    // s == null puts the default star back
-    fun save(s: Sticker?) {
+    // s == null puts the default star back; seconds == null means no end time
+    fun save(s: Sticker?, seconds: Int?) {
         busy = true
         problem = null
-        val body = JSONObject().also { if (s != null) it.put("sticker_id", s.id) }
+        val body = JSONObject()
+        if (s != null) {
+            body.put("sticker_id", s.id)
+            if (seconds != null) body.put("duration_s", seconds)
+        }
         runIo({ Api.call("PUT", "/v1/me/badge", body) }) { r ->
             busy = false
             r.onSuccess { j ->
                 val st = j.optJSONObject("sticker")
-                if (st != null) BadgeStore.stickers[myId] = StickerBadge(st.getString("id"), st.getString("kind"))
-                else BadgeStore.stickers.remove(myId)
+                if (st != null) {
+                    BadgeStore.stickers[myId] = StickerBadge(
+                        st.getString("id"),
+                        st.getString("kind"),
+                        if (j.isNull("until")) null else j.optLong("until")
+                    )
+                } else {
+                    BadgeStore.stickers.remove(myId)
+                }
                 BadgeStore.map[myId] = STAR_BADGE
                 onDismiss()
             }.onFailure { problem = it.message }
@@ -315,54 +490,83 @@ fun BadgePickerDialog(myId: String, onDismiss: () -> Unit) {
         ) {
             Text("Your badge", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
+            val left = current?.until?.let { it - System.currentTimeMillis() }
             Text(
-                "Shown next to your name in chats, groups and profiles.",
+                if (left != null && left > 0) "Ends in " + leftLabel(left)
+                else "Shown next to your name in chats, groups and profiles.",
                 fontSize = 13.sp,
                 color = Ui.muted
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(2.dp))
+            Text("Tap a sticker to wear it. Hold it to wear it for a while.", fontSize = 12.sp, color = Ui.muted)
 
-            val l = list
-            if (l == null && problem == null) {
-                Text("Loading\u2026", color = Ui.muted, modifier = Modifier.padding(vertical = 12.dp))
-            } else {
-                val cells: List<Sticker?> = listOf<Sticker?>(null) + (l ?: emptyList())
-                cells.chunked(6).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { s ->
-                            val on = if (s == null) currentId == null else s.id == currentId
-                            val shape = RoundedCornerShape(16.dp)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1f)
-                                    .clip(shape)
-                                    .background(if (on) Ui.soft else Color.Transparent)
-                                    .then(if (on) Modifier.border(1.5.dp, Ui.ink, shape) else Modifier)
-                                    .clickable(enabled = !busy) { save(s) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (s == null) StarGlyph(34.dp, shimmer = false)
-                                else StickerView(s.id, s.kind, Modifier.fillMaxSize().padding(8.dp))
-                            }
-                        }
-                        repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-                if (l != null && l.isEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Make a sticker with the Sticker Maker bot, or save one from someone, and it shows up here.",
-                        fontSize = 13.sp,
-                        color = Ui.muted
-                    )
+            val r = recent
+            PickerLabel(
+                "Recent",
+                if (!r.isNullOrEmpty()) "Clear" else null
+            ) {
+                runIo({ Api.call("DELETE", "/v1/me/badge/recent") }) { res ->
+                    res.onSuccess { recent = emptyList() }.onFailure { problem = it.message }
                 }
             }
+            if (r == null) {
+                Text("Loading\u2026", color = Ui.muted, modifier = Modifier.padding(vertical = 8.dp))
+            } else {
+                BadgeGrid(listOf<Sticker?>(null) + r, current?.id, busy, { save(it, null) }, { holding = it })
+            }
+
+            val f = featured
+            if (!f.isNullOrEmpty()) {
+                PickerLabel("Featured")
+                BadgeGrid(f, current?.id, busy, { save(it, null) }, { holding = it })
+            }
+
+            PickerLabel("Your stickers")
+            val m = mine
+            if (m == null) {
+                Text("Loading\u2026", color = Ui.muted, modifier = Modifier.padding(vertical = 8.dp))
+            } else if (m.isEmpty()) {
+                Text(
+                    "Make a sticker with the Sticker Maker bot, or save one from someone, and it shows up here.",
+                    fontSize = 13.sp,
+                    color = Ui.muted
+                )
+            } else {
+                BadgeGrid(m, current?.id, busy, { save(it, null) }, { holding = it })
+            }
+
             problem?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+
+    holding?.let { s ->
+        AlertDialog(
+            onDismissRequest = { holding = null },
+            containerColor = Ui.bg,
+            title = { Text("Wear it for how long?") },
+            text = {
+                Column {
+                    BadgeDurations.forEach { (label, seconds) ->
+                        Text(
+                            label,
+                            fontSize = 16.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    holding = null
+                                    save(s, seconds)
+                                }
+                                .padding(vertical = 12.dp, horizontal = 4.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { holding = null }) { Text("Cancel") } }
+        )
     }
 }
