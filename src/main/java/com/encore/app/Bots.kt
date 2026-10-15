@@ -100,7 +100,8 @@ data class Sticker(
     val dur: Int?,
     val mine: Boolean,
     val isPublic: Boolean,
-    val saved: Boolean
+    val saved: Boolean,
+    val canSave: Boolean = false
 )
 
 private fun JSONObject.sOrNull(key: String): String? = if (isNull(key)) null else getString(key)
@@ -140,7 +141,8 @@ object BotApi {
         if (o.isNull("dur")) null else o.optInt("dur"),
         o.optBoolean("mine"),
         o.optBoolean("public"),
-        o.optBoolean("saved")
+        o.optBoolean("saved"),
+        o.optBoolean("can_save")
     )
 
     fun parseMsg(o: JSONObject) = BotMsg(
@@ -186,6 +188,10 @@ object BotApi {
 
     fun share(id: String, on: Boolean) {
         Api.call("PUT", "/v1/stickers/$id/share", JSONObject().put("public", on))
+    }
+
+    fun save(id: String) {
+        Api.call("PUT", "/v1/stickers/$id/save")
     }
 
     fun unsave(id: String) {
@@ -690,7 +696,14 @@ private val BotShape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, botto
 private val UserShape = RoundedCornerShape(topStart = 20.dp, topEnd = 6.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
 
 @Composable
-private fun BotMessageRow(m: BotMsg, time: String?, onSticker: (String) -> Unit, onLibrary: () -> Unit) {
+private fun BotMessageRow(
+    m: BotMsg,
+    time: String?,
+    onSticker: (String) -> Unit,
+    onLibrary: () -> Unit,
+    onPack: (String) -> Unit,
+    onPackList: (Int) -> Unit
+) {
     val mine = m.sender == "user"
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -733,6 +746,39 @@ private fun BotMessageRow(m: BotMsg, time: String?, onSticker: (String) -> Unit,
                 ) {
                     Text(m.body ?: "Your stickers", fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     Text("$n stickers \u00B7 Open collection", fontSize = 13.sp, color = Ui.muted)
+                }
+            }
+            m.kind == "pack" && m.ref != null -> {
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 280.dp)
+                        .clip(BotShape)
+                        .background(Ui.soft)
+                        .clickable { onPack(m.ref) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("\uD83D\uDCE6", fontSize = 26.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(m.body ?: "Pack", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text("Tap to name, fill and publish", fontSize = 13.sp, color = Ui.muted)
+                    }
+                }
+            }
+            m.kind == "pack_list" -> {
+                val n = try { JSONArray(m.ref ?: "[]").length() } catch (e: Exception) { 0 }
+                val mineList = (m.body ?: "").startsWith("Your")
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 280.dp)
+                        .clip(BotShape)
+                        .background(Ui.soft)
+                        .clickable { onPackList(if (mineList) 0 else 2) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text(m.body ?: "Packs", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text("$n packs \u00B7 Open", fontSize = 13.sp, color = Ui.muted)
                 }
             }
             mine -> {
@@ -1024,7 +1070,7 @@ private fun StickerDetail(id: String, onClose: () -> Unit, onChanged: () -> Unit
                             }
                             .padding(vertical = 12.dp)
                     )
-                } else {
+                } else if (cur.saved) {
                     Text(
                         "Remove from saved",
                         fontSize = 14.sp,
@@ -1041,6 +1087,29 @@ private fun StickerDetail(id: String, onClose: () -> Unit, onChanged: () -> Unit
                                     r.onSuccess {
                                         onChanged()
                                         onClose()
+                                    }.onFailure { problem = it.message }
+                                }
+                            }
+                            .padding(vertical = 12.dp)
+                    )
+                } else if (cur.canSave) {
+                    Text(
+                        "Save sticker",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Ui.ink,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Ui.soft)
+                            .clickable(enabled = !busy) {
+                                busy = true
+                                runIo({ BotApi.save(cur.id) }) { r ->
+                                    busy = false
+                                    r.onSuccess {
+                                        s = cur.copy(saved = true, canSave = false)
+                                        onChanged()
                                     }.onFailure { problem = it.message }
                                 }
                             }
@@ -1089,7 +1158,15 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
     var library by remember { mutableStateOf(false) }
     var detailId by remember { mutableStateOf<String?>(null) }
     var libVersion by remember { mutableIntStateOf(0) }
+    var packsTab by remember { mutableStateOf<Int?>(null) }
+    var packId by remember { mutableStateOf<String?>(null) }
+    var packVersion by remember { mutableIntStateOf(0) }
+    var activePack by remember { mutableStateOf<Pack?>(null) }
     val listState = rememberLazyListState()
+
+    LaunchedEffect(bot.id, packVersion) {
+        runIo({ PackApi.active() }) { r -> r.onSuccess { activePack = it } }
+    }
 
     LaunchedEffect(bot.id) {
         runIo({ BotApi.messages(bot.id) }) { r ->
@@ -1113,6 +1190,8 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
     }
 
     BackHandler(enabled = library) { library = false }
+    BackHandler(enabled = packsTab != null) { packsTab = null }
+    BackHandler(enabled = packId != null) { packId = null }
 
     fun upload(uri: Uri) {
         val kind = pending ?: return
@@ -1133,6 +1212,7 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
                 if (created) {
                     pending = null
                     libVersion++
+                    packVersion++
                 }
             }.onFailure { problem = it.message }
         }
@@ -1152,6 +1232,14 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
             library = true
             return
         }
+        if (b.id == "my_packs") {
+            packsTab = 0
+            return
+        }
+        if (b.id == "find_packs") {
+            packsTab = 2
+            return
+        }
         busy = true
         problem = null
         runIo({
@@ -1161,6 +1249,10 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
             busy = false
             r.onSuccess {
                 messages = it
+                if (b.id == "new_pack") {
+                    packVersion++
+                    StickerCache.refresh(ctx)
+                }
                 val k = when (b.id) {
                     "new_static" -> "static"
                     "new_live" -> "live"
@@ -1240,7 +1332,9 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
                         m,
                         if (last) timeLabel(m.createdAt) else null,
                         onSticker = { detailId = it },
-                        onLibrary = { library = true }
+                        onLibrary = { library = true },
+                        onPack = { packId = it },
+                        onPackList = { packsTab = it }
                     )
                 }
                 if (busy || uploading) {
@@ -1275,6 +1369,39 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
+                val ap = activePack
+                if (ap != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Ui.soft)
+                            .clickable { packId = ap.id }
+                            .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "New stickers go into \"" + ap.title + "\"",
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "Stop",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    runIo({ PackApi.clearActive() }) { r -> r.onSuccess { activePack = null } }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
                 val pk = pending
                 if (pk != null) {
                     Row(
@@ -1348,6 +1475,30 @@ fun BotChatScreen(bot: Bot, onBack: () -> Unit) {
                 version = libVersion,
                 onBack = { library = false },
                 onOpen = { detailId = it.id }
+            )
+        }
+
+        packsTab?.let { t ->
+            PackListScreen(
+                version = packVersion,
+                startTab = t,
+                onBack = { packsTab = null },
+                onOpen = { packId = it },
+                onChanged = {
+                    packVersion++
+                    StickerCache.refresh(ctx)
+                }
+            )
+        }
+
+        packId?.let { id ->
+            PackDetailScreen(
+                ref = id,
+                onBack = { packId = null },
+                onChanged = {
+                    packVersion++
+                    StickerCache.refresh(ctx)
+                }
             )
         }
 
