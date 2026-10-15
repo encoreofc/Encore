@@ -4,10 +4,8 @@ import android.os.Handler
 import android.provider.Settings
 import android.os.Looper
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -32,16 +30,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -217,33 +212,14 @@ fun BadgeOf(userId: String, dim: Dp, shimmer: Boolean = true) {
 }
 
 /* ------------------------------------------------------------------ */
-/* The Encore seal.                                                    */
-/* A woven gold rosette (the kind printed on banknotes and passports   */
-/* to say "this is genuine") draws itself once around the badge, then  */
-/* small 4-point stars drift outward from it. Brand colour only.       */
+/* the stars behind the badge in the sheet                             */
 /* ------------------------------------------------------------------ */
 
-private val SealGold = Color(0xFFFFC400)
+private val StarYellow = Color(0xFFFFC400)
 
-/** Three interlaced wavy rings. progress 0..1 draws them clockwise from the top. */
-private fun DrawScope.drawRosette(progress: Float, radius: Float, amp: Float, color: Color) {
-    if (progress <= 0f) return
-    val lobes = 14
-    val steps = 420
-    val last = (steps * progress.coerceIn(0f, 1f)).toInt().coerceAtLeast(2)
-    val stroke = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-    for (c in 0 until 3) {
-        val path = Path()
-        for (i in 0..last) {
-            val th = -Math.PI / 2 + 2.0 * Math.PI * i / steps
-            val r = radius + amp * Math.sin(lobes * th + c * 2.0 * Math.PI / 3.0).toFloat()
-            val x = center.x + (r * Math.cos(th)).toFloat()
-            val y = center.y + (r * Math.sin(th)).toFloat()
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        drawPath(path, color, style = stroke)
-    }
-}
+// motion curves (Material 3 tokens): enter the screen / move on screen
+private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+private val StandardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 private class StarP {
     var x = 0f
@@ -257,9 +233,9 @@ private class StarP {
 }
 
 /**
- * Stars are born in a ring around the badge, drift outward, fade in with a little
- * overshoot, live 2-3 s, fade out and are born again. The whole field turns once
- * in 40-60 s. Sizes 4 / 10 / 8 dp.
+ * Small 4-point stars are born around the badge, drift outward, fade in with a little
+ * overshoot, live 2-3 s, fade out and are born again. The whole field turns once in
+ * 40-60 s. Sizes 4 / 10 / 8 dp.
  */
 private class StarField(count: Int) {
     private val ps = List(count) { StarP() }
@@ -375,30 +351,26 @@ fun Badge(userId: String?, size: TextUnit = 14.sp, name: String? = null) {
 @Composable
 private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
-    val haptic = LocalHapticFeedback.current
     // if the phone has animations switched off, show the finished sheet at once
     val calm = remember {
         Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }
-    val medal = remember { Animatable(if (calm) 1f else 0f) }
-    val seal = remember { Animatable(if (calm) 1f else 0f) }
+    val hero = remember { Animatable(if (calm) 1f else 0f) }
     val stars = remember { Animatable(if (calm) 1f else 0f) }
     val copy = remember { Animatable(if (calm) 1f else 0f) }
 
-    // one calm sequence, about a second: medallion settles, the seal draws itself,
-    // the text comes up, a light tick when the seal closes, then the stars begin
+    // three short steps, each under half a second:
+    // the badge settles in, the text follows, the stars come up last
     LaunchedEffect(Unit) {
         if (calm) return@LaunchedEffect
-        launch { medal.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) }
+        launch { hero.animateTo(1f, tween(400, easing = EmphasizedDecelerate)) }
         launch {
-            delay(220)
-            copy.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
+            delay(120)
+            copy.animateTo(1f, tween(300, easing = StandardEasing))
         }
         launch {
-            delay(140)
-            seal.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            stars.animateTo(1f, tween(600))
+            delay(250)
+            stars.animateTo(1f, tween(500))
         }
     }
 
@@ -418,35 +390,26 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 24.dp),
+                .padding(horizontal = 28.dp)
+                .padding(bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // the stage: seal, stars and the badge on its medallion
+            // the stage: stars behind, the badge in front
             Box(Modifier.fillMaxWidth().height(252.dp), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.matchParentSize()) {
-                    drawRosette(seal.value, 70.dp.toPx(), 5.dp.toPx(), SealGold.copy(alpha = 0.7f))
-                }
                 if (!calm) {
-                    StarParticles(Modifier.matchParentSize(), SealGold, 84.dp) { stars.value }
+                    StarParticles(Modifier.matchParentSize(), StarYellow, 84.dp) { stars.value }
                 }
                 Box(
                     Modifier
-                        .size(112.dp)
                         .graphicsLayer {
-                            val m = medal.value
-                            scaleX = 0.88f + 0.12f * m
-                            scaleY = 0.88f + 0.12f * m
+                            val m = hero.value
+                            scaleX = 0.9f + 0.1f * m
+                            scaleY = 0.9f + 0.1f * m
                             alpha = m.coerceIn(0f, 1f)
                         }
-                        .clip(CircleShape)
-                        .background(Ui.soft)
-                        .border(1.dp, Ui.ink.copy(alpha = 0.08f), CircleShape),
-                    contentAlignment = Alignment.Center
+                        .semantics { contentDescription = "Verified badge" }
                 ) {
-                    Box(Modifier.semantics { contentDescription = "Verified badge" }) {
-                        BadgeGlyph(e, 76.dp, true, sticker)
-                    }
+                    BadgeGlyph(e, 120.dp, true, sticker)
                 }
             }
 
@@ -455,44 +418,44 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
                     .fillMaxWidth()
                     .graphicsLayer {
                         alpha = copy.value
-                        translationY = (1f - copy.value) * 10.dp.toPx()
+                        translationY = (1f - copy.value) * 8.dp.toPx()
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     "Verified account",
-                    fontSize = 22.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.2).sp,
+                    letterSpacing = (-0.3).sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.semantics { heading() }
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     "This account has been verified by Encore.",
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp,
                     color = Ui.muted,
                     textAlign = TextAlign.Center
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     detail,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
                     color = Ui.muted.copy(alpha = 0.85f),
                     textAlign = TextAlign.Center
                 )
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(36.dp))
                 Text(
                     "OK",
                     color = Ui.onInk,
-                    fontSize = 16.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
+                        .height(56.dp)
                         .clip(CircleShape)
                         .background(Ui.ink)
                         .clickable(role = Role.Button, onClick = onDismiss)
