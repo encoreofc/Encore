@@ -140,7 +140,8 @@ private fun Composer(
         TextField(
             value = st.text,
             onValueChange = { st.onTextChange(it) },
-            placeholder = { Text("Message", color = Ui.muted) },
+            placeholder = { Text("Message", color = Ui.muted, fontSize = 18.sp) },
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp),
             interactionSource = src,
             leadingIcon = {
                 // sticker button inside the field, left side; turns into a keyboard button while the panel is open
@@ -364,10 +365,20 @@ fun ConversationScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(row, fontSize = 12.sp, color = Ui.muted)
+                            // Telegram-style date pill: 14sp bold text, 11dp corners
+                            Text(
+                                row,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Ui.muted,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(Ui.soft)
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
                         }
                     } else if (row is MsgItem) {
                         val m = row.msg
@@ -378,11 +389,18 @@ fun ConversationScreen(
                                     .padding(vertical = 6.dp, horizontal = 24.dp),
                                 contentAlignment = Alignment.Center
                             ) {
+                                // Telegram-style service pill: 14sp bold, 11dp corners, max width 272dp
                                 Text(
                                     m.body ?: "",
-                                    fontSize = 12.sp,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = Ui.muted,
-                                    textAlign = TextAlign.Center
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .widthIn(max = 272.dp)
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(Ui.soft)
+                                        .padding(horizontal = 12.dp, vertical = 5.dp)
                                 )
                             }
                         } else {
