@@ -415,8 +415,7 @@ fun ConversationScreen(
                                 onImage = { viewer = row },
                                 onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } },
                                 onVideo = { player = row },
-                                onOnce = { st.openOnce(row) { once = it } },
-                                onSticker = { if (!m.id.startsWith("local-")) packFor = m.body }
+                                onOnce = { st.openOnce(row) { once = it } }
                             )
                         }
                     }
