@@ -320,7 +320,7 @@ private object StickerPrep {
         if (type != "image/gif" && type != "image/webp") {
             throw ApiException("bad_type", "Pick a GIF or an animated WebP image.")
         }
-        val bytes = readLimited(ctx, uri, 3 * MEGA, "That file is over 3 MB. Pick a smaller one.")
+        val bytes = readLimited(ctx, uri, 10 * MEGA, "That file is over 10 MB. Pick a smaller one.")
         val (w, h) = bounds(ctx, uri)
         return Prepared(bytes, type, maxOf(w, 0), maxOf(h, 0), 0)
     }
