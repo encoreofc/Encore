@@ -16,11 +16,15 @@ import org.json.JSONObject
 
 data class SessionInfo(val id: String, val device: String?, val createdAt: Long, val current: Boolean)
 
-private data class Acct(val hasPassword: Boolean, val googleEmail: String?)
+private data class Acct(val id: String, val hasPassword: Boolean, val googleEmail: String?)
 
 private fun fetchAcct(): Acct {
     val u = Api.call("GET", "/v1/me").getJSONObject("user")
-    return Acct(u.optBoolean("has_password", true), if (u.isNull("google_email")) null else u.getString("google_email"))
+    return Acct(
+        u.optString("id"),
+        u.optBoolean("has_password", true),
+        if (u.isNull("google_email")) null else u.getString("google_email")
+    )
 }
 
 private fun fetchSessions(): List<SessionInfo> {
@@ -107,6 +111,7 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
     var delete by remember { mutableStateOf(false) }
     var pw by remember { mutableStateOf(false) }
     var unlink by remember { mutableStateOf(false) }
+    var badgePick by remember { mutableStateOf(false) }
     var acct by remember { mutableStateOf<Acct?>(null) }
     var msg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -156,6 +161,10 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
     }
 
     val a = acct
+    // only verified accounts are in the badge store, so the Badge row below shows only for them
+    LaunchedEffect(a?.id) { a?.id?.takeIf { it.isNotEmpty() }?.let { BadgeStore.want(it) } }
+    val myBadge = a?.let { BadgeStore.map[it.id] }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -176,6 +185,12 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
             ) {
                 SettingRow("Theme", sub = mode, onClick = { theme = true })
                 HorizontalDivider(color = Ui.line)
+                if (myBadge != null) {
+                    SettingRow("Badge", sub = "Shown next to your name", onClick = { badgePick = true }) {
+                        a?.id?.let { BadgeOf(it, 26.dp, shimmer = false) }
+                    }
+                    HorizontalDivider(color = Ui.line)
+                }
                 SettingRow(
                     "Google account",
                     sub = if (a == null) "…" else (a.googleEmail ?: "Not linked. Tap to link"),
@@ -214,6 +229,7 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
     }
 
     if (theme) ThemeDialog(onDismiss = { theme = false })
+    if (badgePick && a != null) BadgePickerDialog(a.id) { badgePick = false }
     if (delete) DeleteAccountDialog(onDismiss = { delete = false }, onDeleted = onLogout)
     if (pw && a != null) {
         PasswordSetDialog(
