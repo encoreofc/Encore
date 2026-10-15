@@ -229,6 +229,7 @@ fun ConversationScreen(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var gallery by remember { mutableStateOf(false) }
+    var packFor by remember { mutableStateOf<String?>(null) }
     var toEdit by remember { mutableStateOf<List<GalleryItem>?>(null) }
 
     // ---- sticker panel: takes the keyboard's place at the same height, no jump ----
@@ -414,7 +415,8 @@ fun ConversationScreen(
                                 onImage = { viewer = row },
                                 onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } },
                                 onVideo = { player = row },
-                                onOnce = { st.openOnce(row) { once = it } }
+                                onOnce = { st.openOnce(row) { once = it } },
+                                onSticker = { if (!m.id.startsWith("local-")) packFor = m.body }
                             )
                         }
                     }
@@ -559,6 +561,10 @@ fun ConversationScreen(
             },
             onDismiss = { attach = false }
         )
+    }
+
+    packFor?.let { sid ->
+        StickerPackSheet(sid, onClose = { packFor = null }, onChanged = { StickerCache.refresh(ctx) })
     }
 
     viewer?.let { v ->
