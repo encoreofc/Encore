@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -293,46 +294,82 @@ fun UserPageScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.End
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Ui.ink)
-                }
-            }
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val avatarNow = peer?.let { Avatars.url(it.id) }
+                // a big photo across the full width, like Telegram's profile; the name sits on it
                 Box(
                     modifier = Modifier
-                        .size(100.dp)
-                        .clip(CircleShape)
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .background(Ui.soft)
                         .onGloballyPositioned { avatarBox = it.boundsInRoot() }
                         .then(if (avatarNow != null) Modifier.clickable { photoUrl = avatarNow } else Modifier)
                 ) {
-                    Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 100.dp)
+                    // the letters show until the photo is there, or when there is no photo
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 138.dp)
+                    }
+                    if (avatarNow != null) {
+                        val heroCtx = LocalContext.current
+                        val heroReq = remember(avatarNow) {
+                            ImageRequest.Builder(heroCtx)
+                                .data(avatarNow)
+                                .addHeader("Authorization", "Bearer ${Session.token}")
+                                .crossfade(true)
+                                .build()
+                        }
+                        AsyncImage(
+                            model = heroReq,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    // a soft dark fade at the bottom so the white name can be read on any photo
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.45f)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xB3000000))))
+                    )
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 18.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                peer?.displayName ?: "Unknown",
+                                color = Color.White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Badge(peer?.id, 20.sp, name = peer?.displayName)
+                        }
+                        if (peer != null) {
+                            Text("@" + peer.username, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+                        }
+                    }
                 }
                 Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        peer?.displayName ?: "Unknown",
-                        fontSize = 17.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Badge(peer?.id, 17.5.sp, name = peer?.displayName)
-                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                 val b = bio
                 if (!b.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
@@ -352,11 +389,6 @@ fun UserPageScreen(
                         Spacer(Modifier.width(4.dp))
                         Text(loc, fontSize = 13.5.sp, color = Ui.muted)
                         Spacer(Modifier.width(16.dp))
-                    }
-                    if (peer != null) {
-                        Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("@" + peer.username, fontSize = 13.5.sp, color = Ui.muted)
                     }
                 }
                 Spacer(Modifier.height(20.dp))
@@ -516,7 +548,19 @@ fun UserPageScreen(
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(24.dp))
+                }
             }
+        }
+        // the close button floats over the photo, top right
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(8.dp)
+                .background(Color(0x66000000), CircleShape)
+        ) {
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
         }
         SoonToast(soon, 40.dp)
         val shownUrl = photoUrl
