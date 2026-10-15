@@ -178,7 +178,7 @@ object PhotoSaver {
 /* ------------------------------------------------------------------ */
 
 @Composable
-private fun PpGalleryGlyph(color: Color) {
+internal fun PpGalleryGlyph(color: Color) {
     Canvas(Modifier.size(24.dp)) {
         val w = size.width
         val sw = w * 0.08f
@@ -202,7 +202,7 @@ private fun PpGalleryGlyph(color: Color) {
 }
 
 @Composable
-private fun PpDownloadGlyph(color: Color) {
+internal fun PpDownloadGlyph(color: Color) {
     Canvas(Modifier.size(24.dp)) {
         val w = size.width
         val sw = w * 0.09f
@@ -306,7 +306,7 @@ private fun PpSegments(count: Int, current: Int) {
 }
 
 @Composable
-private fun PpAction(title: String, sub: String, glyph: @Composable () -> Unit, onClick: () -> Unit) {
+internal fun PpAction(title: String, sub: String, glyph: @Composable () -> Unit, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
