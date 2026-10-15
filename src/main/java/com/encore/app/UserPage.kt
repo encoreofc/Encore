@@ -316,22 +316,22 @@ fun UserPageScreen(
                 val avatarNow = peer?.let { Avatars.url(it.id) }
                 Box(
                     modifier = Modifier
-                        .size(120.dp)
+                        .size(100.dp)
                         .clip(CircleShape)
                         .onGloballyPositioned { avatarBox = it.boundsInRoot() }
                         .then(if (avatarNow != null) Modifier.clickable { photoUrl = avatarNow } else Modifier)
                 ) {
-                    Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 120.dp)
+                    Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 100.dp)
                 }
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         peer?.displayName ?: "Unknown",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 17.5.sp,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    Badge(peer?.id, 20.sp, name = peer?.displayName)
+                    Badge(peer?.id, 17.5.sp, name = peer?.displayName)
                 }
                 val b = bio
                 if (!b.isNullOrBlank()) {
@@ -350,13 +350,13 @@ fun UserPageScreen(
                     if (!loc.isNullOrBlank()) {
                         Icon(Icons.Default.LocationOn, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(loc, fontSize = 13.sp, color = Ui.muted)
+                        Text(loc, fontSize = 13.5.sp, color = Ui.muted)
                         Spacer(Modifier.width(16.dp))
                     }
                     if (peer != null) {
                         Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("@" + peer.username, fontSize = 13.sp, color = Ui.muted)
+                        Text("@" + peer.username, fontSize = 13.5.sp, color = Ui.muted)
                     }
                 }
                 Spacer(Modifier.height(20.dp))
