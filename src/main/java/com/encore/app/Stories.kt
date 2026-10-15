@@ -172,7 +172,6 @@ object StoriesApi {
 @Composable
 fun StoriesRow(me: User, onOpen: (List<StoryGroup>, Int, Int) -> Unit, onAdd: () -> Unit) {
     var groups by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
-    val dash = Ui.muted.copy(alpha = 0.7f)
 
     fun load() {
         runIo({ StoriesApi.feed() }) { r -> r.onSuccess { groups = it } }
@@ -183,16 +182,19 @@ fun StoriesRow(me: User, onOpen: (List<StoryGroup>, Int, Int) -> Unit, onAdd: ()
     val mineIdx = groups.indexOfFirst { it.mine }
     val mine = groups.getOrNull(mineIdx)
 
+    // nothing to show -> no space taken; adding a story lives in the top bar
+    if (groups.isEmpty()) return
+
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 14.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        item {
+        if (mine != null) item {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .clickable { if (mine != null) onOpen(groups, mineIdx, -1) else onAdd() }
+                    .clickable { onOpen(groups, mineIdx, -1) }
                     .padding(horizontal = 6.dp, vertical = 4.dp)
             ) {
                 Box(modifier = Modifier.size(64.dp)) {
@@ -216,27 +218,10 @@ fun StoriesRow(me: User, onOpen: (List<StoryGroup>, Int, Int) -> Unit, onAdd: ()
                         ) {
                             Icon(Icons.Default.Add, contentDescription = "Add story", tint = Ui.onInk, modifier = Modifier.size(14.dp))
                         }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .drawBehind {
-                                    drawCircle(
-                                        color = dash,
-                                        style = Stroke(
-                                            width = 1.5.dp.toPx(),
-                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f))
-                                        )
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = Ui.muted)
-                        }
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                Text(if (mine != null) "Your story" else "Add story", fontSize = 12.sp, color = Ui.muted)
+                Text("Your story", fontSize = fs(13f), color = Ui.muted)
             }
         }
         items(groups.filter { !it.mine }, key = { it.user.id }) { g ->
@@ -259,10 +244,11 @@ fun StoriesRow(me: User, onOpen: (List<StoryGroup>, Int, Int) -> Unit, onAdd: ()
                 Spacer(Modifier.height(6.dp))
                 Text(
                     g.user.displayName,
-                    fontSize = 12.sp,
+                    fontSize = fs(13f),
+                    color = Ui.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 64.dp)
+                    modifier = Modifier.widthIn(max = 68.dp)
                 )
             }
         }
