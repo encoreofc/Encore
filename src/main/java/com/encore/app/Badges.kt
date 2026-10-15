@@ -342,8 +342,8 @@ fun Badge(userId: String?, size: TextUnit = 14.sp, name: String? = null) {
     val e = BadgeStore.map[userId] ?: return
     val sticker = BadgeStore.stickers[userId].activeNow()
     var open by remember(userId) { mutableStateOf(false) }
-    val dim = with(LocalDensity.current) { size.toDp() } * 1.2f
-    Spacer(Modifier.width(5.dp))
+    val dim = with(LocalDensity.current) { size.toDp() } * 1.1f
+    Spacer(Modifier.width(4.dp))
     Box(Modifier.clip(CircleShape).clickable { open = true }) { BadgeGlyph(e, dim, true, sticker) }
     if (open) BadgeSheet(e, sticker, name) { open = false }
 }
