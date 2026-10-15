@@ -52,6 +52,7 @@ internal fun Bubble(
     val isVideo = !deleted && item.media != null && m.kind == "video"
     val hasMedia = !deleted && item.media != null && (m.kind == "image" || m.kind == "file")
     val haptic = LocalHapticFeedback.current
+    val isSticker = !deleted && m.kind == "sticker" && !m.body.isNullOrBlank()
     val shape = if (mine) {
         RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
     } else {
@@ -63,7 +64,36 @@ internal fun Bubble(
             .padding(vertical = 2.dp),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
-        Surface(
+        if (isSticker) {
+            // a sticker has no bubble: it sits on the chat background, time in a small pill below
+            Box(
+                modifier = Modifier
+                    .size(156.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            if (!m.id.startsWith("local-")) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongPress()
+                            }
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                StickerView(m.body ?: "", item.media?.type ?: "image", Modifier.fillMaxSize())
+            }
+            Text(
+                clock(m.createdAt) + (if (mine) "  $tick" else ""),
+                fontSize = 11.sp,
+                color = Ui.muted,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Ui.soft)
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        } else Surface(
             color = if (deleted) Color.Transparent else if (mine) Ui.mine else Ui.theirs,
             contentColor = if (deleted) Ui.muted else if (mine) Ui.onMine else Ui.ink,
             shape = shape,
@@ -130,7 +160,7 @@ internal fun Bubble(
                             Text(replyName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(
                                 if (reply == null || reply.deleted) "Message unavailable"
-                                else (reply.body ?: kindLabel(reply.kind)),
+                                else msgPreview(reply.kind, reply.body),
                                 fontSize = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
