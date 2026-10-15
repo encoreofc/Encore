@@ -68,6 +68,24 @@ object Outbox {
         kick()
     }
 
+    /** a sticker is just an id, so it is shown at once and sent like a text */
+    suspend fun enqueueSticker(convId: String, me: User, s: Sticker, rep: MsgItem?) {
+        val clientId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val reply = rep?.let { ReplyInfo(it.msg.id, it.msg.senderId, it.msg.body, it.msg.deleted, it.msg.kind) }
+        val local = MsgItem(
+            Msg("local-$clientId", convId, me.id, "sticker", s.id, now, false, clientId),
+            null, null, rep?.msg?.id, reply,
+            Media("sticker", 0L, s.kind, s.w, s.h, (s.dur ?: 0).toLong())
+        )
+        dao.putMessages(listOf(local.toEntity()))
+        dao.putOutbox(
+            OutboxEntity(clientId, convId, "sticker", s.id, rep?.msg?.id, null, null, 0L, s.kind, s.w, s.h, 0, now, 0)
+        )
+        dao.touchConv(convId, me.id, "sticker", "Sticker", now, false, 0)
+        kick()
+    }
+
     /** copies the file into app storage (so it survives a restart), shows it at once, uploads in the background */
     suspend fun enqueueMedia(
         c: Context,
@@ -136,6 +154,12 @@ object Outbox {
         val lid = "local-${row.clientId}"
         if (row.kind == "text") {
             val item = Features.send(row.conversationId, row.body ?: "", row.clientId, row.replyTo)
+            Sync.applyItems(listOf(item), null)
+            dao.deleteOutbox(row.clientId)
+            return
+        }
+        if (row.kind == "sticker") {
+            val item = Features.sendSticker(row.conversationId, row.body ?: "", row.clientId, row.replyTo)
             Sync.applyItems(listOf(item), null)
             dao.deleteOutbox(row.clientId)
             return
