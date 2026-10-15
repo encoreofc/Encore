@@ -14,12 +14,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val BadgeYellow = Color(0xFFFFC400)
+
+// Telegram-style: text size is fixed in dp, so the phone's Font size setting can't shrink it
+@Composable
+internal fun fs(v: Float) = with(LocalDensity.current) { v.dp.toSp() }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,43 +85,36 @@ fun ChatListScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+                    .padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     "Encore",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = fs(26f),
+                    fontWeight = FontWeight.Bold,
+                    color = Ui.ink,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onSearch) {
-                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.ink)
+                IconButton(onClick = onAddStory, modifier = Modifier.size(52.dp)) {
+                    Icon(Icons.Default.AddCircle, contentDescription = "Add story", tint = Ui.ink, modifier = Modifier.size(28.dp))
                 }
-            }
-
-            StoriesRow(me, onStories, onAddStory)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Chats", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Ui.muted, modifier = Modifier.weight(1f))
+                IconButton(onClick = onSearch, modifier = Modifier.size(52.dp)) {
+                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.ink, modifier = Modifier.size(28.dp))
+                }
                 Box {
-                    IconButton(onClick = { menu = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink)
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(52.dp)) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink, modifier = Modifier.size(28.dp))
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Settings") },
+                            text = { Text("Settings", fontSize = fs(16f)) },
                             onClick = {
                                 menu = false
                                 onSettings()
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Log out") },
+                            text = { Text("Log out", fontSize = fs(16f)) },
                             onClick = {
                                 menu = false
                                 onLogout()
@@ -126,10 +124,15 @@ fun ChatListScreen(
                 }
             }
 
+            StoriesRow(me, onStories, onAddStory)
+
+            HorizontalDivider(thickness = 0.5.dp, color = Ui.line)
+
             if (loaded && chats.isEmpty()) {
                 Text(
                     "No chats yet. Tap New Chat to start one.",
                     color = Ui.muted,
+                    fontSize = fs(16f),
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp)
                 )
             }
@@ -146,43 +149,45 @@ fun ChatListScreen(
                         last.kind == "system" -> last.preview ?: ""
                         else -> last.preview ?: kindLabel(last.kind)
                     }
+                    Column {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpen(c) }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(start = 14.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(p?.id ?: c.id, name, 52.dp)
+                        Avatar(p?.id ?: c.id, name, 56.dp)
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     name,
-                                    fontSize = 16.sp,
-                                    fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Medium,
+                                    fontSize = fs(17f),
+                                    fontWeight = FontWeight.Medium,
+                                    color = Ui.ink,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Badge(p?.id, name = name)
                             }
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(3.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (mineLast) {
                                     Icon(
                                         Icons.Default.Done,
                                         contentDescription = null,
                                         tint = Ui.muted,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(Modifier.width(4.dp))
                                 }
                                 Text(
                                     preview,
-                                    color = if (c.unread > 0) Ui.ink else Ui.muted,
-                                    fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Normal,
-                                    fontSize = 14.sp,
+                                    color = Ui.muted,
+                                    fontWeight = FontWeight.Normal,
+                                    fontSize = fs(16f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -190,13 +195,13 @@ fun ChatListScreen(
                         }
                         Spacer(Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = 12.sp)
+                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = fs(13f))
                             if (c.unread > 0) {
-                                Spacer(Modifier.height(5.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Box(
                                     modifier = Modifier
-                                        .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
-                                        .clip(CircleShape)
+                                        .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+                                        .clip(RoundedCornerShape(11.dp))
                                         .background(if (c.muted) Ui.muted else BadgeYellow)
                                         .padding(horizontal = 6.dp),
                                     contentAlignment = Alignment.Center
@@ -204,12 +209,18 @@ fun ChatListScreen(
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
                                         color = if (c.muted) Ui.onInk else Color(0xFF111111),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontSize = fs(13f),
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
                         }
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 84.dp),
+                        thickness = 0.5.dp,
+                        color = Ui.line
+                    )
                     }
                 }
             }
@@ -231,12 +242,12 @@ fun ChatListScreen(
                         .clip(RoundedCornerShape(24.dp))
                         .background(Ui.ink)
                         .clickable { sheet = true }
-                        .padding(horizontal = 22.dp, vertical = 12.dp),
+                        .padding(horizontal = 24.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, tint = Ui.onInk)
                     Spacer(Modifier.width(6.dp))
-                    Text("New Chat", color = Ui.onInk, fontWeight = FontWeight.Medium)
+                    Text("New Chat", color = Ui.onInk, fontSize = fs(16f), fontWeight = FontWeight.Medium)
                 }
                 Box(
                     modifier = Modifier
