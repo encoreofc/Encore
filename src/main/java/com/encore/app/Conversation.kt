@@ -5,11 +5,18 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +33,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -99,7 +111,19 @@ private fun ConversationHeader(
 }
 
 @Composable
-private fun Composer(st: ConversationState, voice: VoiceController, onAttach: () -> Unit) {
+private fun Composer(
+    st: ConversationState,
+    voice: VoiceController,
+    panelOpen: Boolean,
+    focus: FocusRequester,
+    onSticker: () -> Unit,
+    onFieldTap: () -> Unit,
+    onAttach: () -> Unit
+) {
+    val src = remember { MutableInteractionSource() }
+    LaunchedEffect(src) {
+        src.interactions.collect { if (it is PressInteraction.Release) onFieldTap() }
+    }
     if (voice.recording) {
         RecordingBar(voice)
         return
@@ -117,6 +141,15 @@ private fun Composer(st: ConversationState, voice: VoiceController, onAttach: ()
             value = st.text,
             onValueChange = { st.onTextChange(it) },
             placeholder = { Text("Message", color = Ui.muted) },
+            interactionSource = src,
+            leadingIcon = {
+                // sticker button inside the field, left side; turns into a keyboard button while the panel is open
+                IconButton(onClick = onSticker) {
+                    Crossfade(panelOpen, animationSpec = tween(150), label = "stk") { open ->
+                        if (open) KeyboardGlyph(Ui.ink) else StickerGlyph(Ui.ink)
+                    }
+                }
+            },
             shape = RoundedCornerShape(24.dp),
             maxLines = 4,
             colors = TextFieldDefaults.colors(
@@ -126,7 +159,7 @@ private fun Composer(st: ConversationState, voice: VoiceController, onAttach: ()
                 unfocusedIndicatorColor = Color.Transparent,
                 disabledIndicatorColor = Color.Transparent
             ),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).focusRequester(focus)
         )
         if (st.text.isBlank()) {
             IconButton(onClick = { voice.onMicClick() }) { MicIcon(Ui.ink) }
@@ -197,6 +230,37 @@ fun ConversationScreen(
     val scope = rememberCoroutineScope()
     var gallery by remember { mutableStateOf(false) }
     var toEdit by remember { mutableStateOf<List<GalleryItem>?>(null) }
+
+    // ---- sticker panel: takes the keyboard's place at the same height, no jump ----
+    // 0 = keyboard / closed, 1 = panel open, 2 = going back to the keyboard
+    var stickerMode by remember { mutableIntStateOf(0) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val density = LocalDensity.current
+    val imeNet = with(density) {
+        (WindowInsets.ime.getBottom(density) - WindowInsets.navigationBars.getBottom(density))
+            .coerceAtLeast(0).toDp()
+    }
+    var kbH by remember { mutableStateOf(StickerPrefs.keyboardDp(ctx).dp) }
+    LaunchedEffect(imeNet) {
+        if (imeNet > 150.dp && imeNet >= kbH) kbH = imeNet
+        if (stickerMode == 2 && imeNet >= kbH - 8.dp) stickerMode = 0
+    }
+    LaunchedEffect(stickerMode) {
+        if (stickerMode == 1) StickerPrefs.setKeyboardDp(ctx, kbH.value)
+        if (stickerMode == 2) {
+            kotlinx.coroutines.delay(700)
+            if (stickerMode == 2) stickerMode = 0
+        }
+    }
+    val reveal by animateFloatAsState(
+        if (stickerMode == 0) 0f else 1f,
+        tween(240, easing = FastOutSlowInEasing),
+        label = "stickerReveal"
+    )
+    // while the keyboard slides, the panel gives up exactly as much height as the keyboard takes
+    val panelH = (kbH * reveal - imeNet).coerceAtLeast(0.dp)
+    if (stickerMode != 0) BackHandler { stickerMode = 0 }
 
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -372,11 +436,45 @@ fun ConversationScreen(
             } else if (rp != null) {
                 ComposerBanner(
                     "Reply to " + (if (rp.msg.senderId == me.id) "yourself" else (peer?.displayName ?: "message")),
-                    rp.msg.body ?: kindLabel(rp.msg.kind)
+                    msgPreview(rp.msg.kind, rp.msg.body)
                 ) { st.replyTo = null }
             }
 
-            Composer(st, voice) { attach = true }
+            Composer(
+                st = st,
+                voice = voice,
+                panelOpen = stickerMode == 1,
+                focus = focus,
+                onSticker = {
+                    if (stickerMode == 1) {
+                        stickerMode = 2
+                        focus.requestFocus()
+                        keyboard?.show()
+                    } else {
+                        stickerMode = 1
+                        keyboard?.hide()
+                    }
+                },
+                onFieldTap = {
+                    if (stickerMode == 1) {
+                        stickerMode = 2
+                        keyboard?.show()
+                    }
+                },
+                onAttach = { attach = true }
+            )
+
+            if (panelH > 0.dp) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(panelH)
+                        .clipToBounds(),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    StickerPanel(Modifier.fillMaxWidth().requiredHeight(kbH)) { s -> st.sendSticker(s) }
+                }
+            }
         }
 
         SoonToast(soon, 80.dp)
