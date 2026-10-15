@@ -1,5 +1,8 @@
 package com.encore.app
 
+import android.app.Activity
+import android.app.ActivityManager
+import android.app.Application
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -7,6 +10,7 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
@@ -60,6 +64,12 @@ object CallManager {
     private var vibrator: Vibrator? = null
     private var callId: String? = null
     private var ice: JSONArray = JSONArray()
+    private var tracking = false
+
+    /** call the person pressed Answer on (notification button) before the call screen was up; accepted once it shows */
+    var acceptCallId by mutableStateOf<String?>(null)
+        private set
+    val acceptRequested: Boolean get() = acceptCallId != null && acceptCallId == callId
 
     /** id of the call the app is currently handling (null when idle) */
     val activeCallId: String? get() = callId
@@ -69,6 +79,38 @@ object CallManager {
 
     fun init(ctx: Context) {
         appCtx = ctx.applicationContext
+        CallNotification.ensureChannel(ctx.applicationContext)
+        trackForeground()
+    }
+
+    /** True while one of the app's screens is on the display, so the in-app call screen can actually be seen. */
+    private fun inForeground(): Boolean {
+        val st = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(st)
+        return st.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+    }
+
+    /** When the app comes to the front while a call is ringing, the in-app screen takes over from the notification. */
+    private fun trackForeground() {
+        if (tracking) return
+        val app = appCtx as? Application ?: return
+        tracking = true
+        app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: Activity) {
+                if (phase == CallPhase.Ringing) takeOverRinging()
+            }
+            override fun onActivityCreated(a: Activity, s: Bundle?) {}
+            override fun onActivityResumed(a: Activity) {}
+            override fun onActivityPaused(a: Activity) {}
+            override fun onActivityStopped(a: Activity) {}
+            override fun onActivitySaveInstanceState(a: Activity, o: Bundle) {}
+            override fun onActivityDestroyed(a: Activity) {}
+        })
+    }
+
+    private fun takeOverRinging() {
+        appCtx?.let { CallNotification.cancel(it) }
+        startRing()
     }
 
     private fun ui(block: () -> Unit) {
@@ -138,8 +180,14 @@ object CallManager {
         speaker = false
         seconds = 0
         phase = CallPhase.Ringing
-        appCtx?.let { CallNotification.cancel(it) } // the in-app screen takes over from the notification
-        startRing()
+        if (inForeground()) {
+            appCtx?.let { CallNotification.cancel(it) } // the in-app screen takes over from the notification
+            startRing()
+        } else {
+            // the app is in the background, so the in-app screen cannot be seen: the system call notification
+            // (heads-up banner / full-screen call) rings instead, and the in-app screen takes over when the app opens
+            appCtx?.let { CallNotification.ensureShown(it, id, peerId, peerName) }
+        }
         main.postDelayed({
             if (g == gen && phase == CallPhase.Ringing) finish("Missed call")
         }, 60000L)
@@ -149,7 +197,8 @@ object CallManager {
      * The app was opened from the "incoming call" notification (app was closed or in the background):
      * the realtime invite was missed, so check the call is still ringing and then show the call screen.
      */
-    fun incomingFromPush(id: String, peer: String, name: String) {
+    fun incomingFromPush(id: String, peer: String, name: String, autoAccept: Boolean = false) {
+        if (autoAccept) acceptCallId = id // Answer was pressed on the call notification: accept once the call screen is up
         if (phase != CallPhase.Idle || callId == id) return
         Thread {
             try {
@@ -160,10 +209,18 @@ object CallManager {
                             incoming(id, JSONObject().put("id", peer).put("display_name", name))
                         }
                     }
+                } else {
+                    ui { if (acceptCallId == id) acceptCallId = null } // already answered or ended: nothing to accept
                 }
             } catch (e: Exception) {
+                ui { if (acceptCallId == id) acceptCallId = null }
             }
         }.start()
+    }
+
+    /** The accept request was handled (or is no longer needed). */
+    fun clearAcceptRequest() {
+        acceptCallId = null
     }
 
     fun accept() {
@@ -243,6 +300,7 @@ object CallManager {
         releaseMedia()
         phase = CallPhase.Idle
         callId = null
+        acceptCallId = null
         pulled = false
         seconds = 0
         toast(note)
@@ -265,6 +323,7 @@ object CallManager {
 
     /** Incoming call: the phone's own ringtone (at ring volume) plus vibration, following the ringer switch. */
     private fun startRing() {
+        if (ringtone != null || vibrator != null) return // already ringing
         val c = appCtx ?: return
         val am = c.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         val mode = am?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
