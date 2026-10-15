@@ -9,6 +9,24 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -327,9 +345,11 @@ fun MediaBlock(cid: String, item: MsgItem, progress: Float?, onImage: () -> Unit
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImageViewer(cid: String, item: MsgItem, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val url = Uploads.url(cid, item.msg.id)
     val req = remember(url) {
         ImageRequest.Builder(ctx)
@@ -338,27 +358,178 @@ fun ImageViewer(cid: String, item: MsgItem, onClose: () -> Unit) {
             .crossfade(true)
             .build()
     }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .clickable { onClose() }
-        ) {
-            AsyncImage(
-                model = req,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+    var scale by remember { mutableFloatStateOf(1f) }
+    var ox by remember { mutableFloatStateOf(0f) }
+    var oy by remember { mutableFloatStateOf(0f) }
+    var chrome by remember { mutableStateOf(true) }
+    var menu by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
+    val open = remember { Animatable(0f) }
+    val fade = remember { Animatable(1f) }
+    val dragY = remember { Animatable(0f) }
+    val chromeAlpha by animateFloatAsState(if (chrome) 1f else 0f, tween(200), label = "viewerChrome")
+    val whenText = remember(item.msg.createdAt) {
+        java.text.SimpleDateFormat("d MMM yyyy \u00B7 HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(item.msg.createdAt))
+    }
+
+    LaunchedEffect(Unit) { open.animateTo(1f, tween(220, easing = FastOutSlowInEasing)) }
+
+    fun dismiss() {
+        if (closing) return
+        closing = true
+        scope.launch {
+            fade.animateTo(0f, tween(160))
+            onClose()
+        }
+    }
+
+    // double tap: zoom in around the finger, or back out
+    fun zoomTo(target: Float, cx: Float, cy: Float, w: Float, h: Float) {
+        val s0 = scale
+        val x0 = ox
+        val y0 = oy
+        val mx = w * (target - 1f) / 2f
+        val my = h * (target - 1f) / 2f
+        val x1 = if (target <= 1f) 0f else ((w / 2f - cx) * (target - 1f)).coerceIn(-mx, mx)
+        val y1 = if (target <= 1f) 0f else ((h / 2f - cy) * (target - 1f)).coerceIn(-my, my)
+        scope.launch {
+            Animatable(0f).animateTo(1f, tween(240, easing = FastOutSlowInEasing)) {
+                scale = s0 + (target - s0) * value
+                ox = x0 + (x1 - x0) * value
+                oy = y0 + (y1 - y0) * value
             }
+        }
+    }
+
+    fun save(toGallery: Boolean) {
+        menu = false
+        val app = ctx.applicationContext
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+        runIo({ PhotoSaver.save(app, url, "Encore_$stamp", toGallery) }) { r ->
+            r.onSuccess {
+                Toast.makeText(app, if (toGallery) "Saved to Gallery" else "Saved to Downloads", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(app, it.message ?: "Couldn't save the photo", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = { dismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // dark background, thins out while the photo is pulled down
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val pull = (abs(dragY.value) / (size.height * 0.5f).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                        alpha = open.value * fade.value * (1f - pull)
+                    }
+                    .background(Color.Black)
+            )
+
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = { o ->
+                                val w = size.width.toFloat()
+                                val h = size.height.toFloat()
+                                if (scale > 1.01f) zoomTo(1f, o.x, o.y, w, h) else zoomTo(2.5f, o.x, o.y, w, h)
+                            },
+                            onTap = { chrome = !chrome }
+                        )
+                    }
+                    .pointerInput(Unit) {
+                        // two fingers or a zoomed photo: pinch and move. one finger on a normal photo: pull down to close
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var pulling = false
+                            var pull = 0f
+                            do {
+                                val ev = awaitPointerEvent()
+                                val down = ev.changes.count { it.pressed }
+                                if (down >= 2 || scale > 1.01f) {
+                                    val z = ev.calculateZoom()
+                                    val p = ev.calculatePan()
+                                    val ns = (scale * z).coerceIn(1f, 5f)
+                                    val mx = size.width * (ns - 1f) / 2f
+                                    val my = size.height * (ns - 1f) / 2f
+                                    ox = (ox + p.x).coerceIn(-mx, mx)
+                                    oy = (oy + p.y).coerceIn(-my, my)
+                                    scale = ns
+                                    if (ns <= 1.01f) {
+                                        ox = 0f
+                                        oy = 0f
+                                    }
+                                    ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                                } else {
+                                    val dy = ev.calculatePan().y
+                                    pull += dy
+                                    if (pulling || abs(pull) > viewConfiguration.touchSlop) {
+                                        pulling = true
+                                        scope.launch { dragY.snapTo(dragY.value + dy) }
+                                        ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                                    }
+                                }
+                            } while (ev.changes.any { it.pressed })
+                            if (pulling) {
+                                if (abs(dragY.value) > size.height * 0.16f) dismiss()
+                                else scope.launch { dragY.animateTo(0f, spring()) }
+                            }
+                        }
+                    }
+            ) {
+                AsyncImage(
+                    model = req,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val enter = 0.94f + 0.06f * open.value
+                            scaleX = scale * enter
+                            scaleY = scale * enter
+                            translationX = ox
+                            translationY = oy + dragY.value
+                            alpha = open.value * fade.value
+                        }
+                )
+            }
+
+            val barAlpha = chromeAlpha * open.value * fade.value * (1f - (abs(dragY.value) / 200f).coerceIn(0f, 1f))
+            if (barAlpha > 0.01f && scale <= 1.01f) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .graphicsLayer { alpha = barAlpha }
+                        .background(Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent)))
+                        .statusBarsPadding()
+                        .padding(top = 6.dp, bottom = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { dismiss() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Photo", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(whenText, color = Color(0xB3FFFFFF), fontSize = 12.sp)
+                    }
+                    IconButton(onClick = { menu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    if (menu) {
+        ModalBottomSheet(onDismissRequest = { menu = false }, containerColor = Ui.bg) {
+            PpAction("Save to Gallery", "Pictures \u00B7 Encore", { PpGalleryGlyph(Ui.ink) }) { save(true) }
+            PpAction("Save to Downloads", "Download \u00B7 Encore", { PpDownloadGlyph(Ui.ink) }) { save(false) }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
