@@ -1,8 +1,13 @@
 package com.encore.app 
 
 import android.os.Handler
+import android.provider.Settings
 import android.os.Looper
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -27,16 +32,28 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /** The server sends this for verified people who have no sticker badge. */
@@ -199,41 +216,141 @@ fun BadgeOf(userId: String, dim: Dp, shimmer: Boolean = true) {
     BadgeGlyph(e, dim, shimmer, BadgeStore.stickers[userId].activeNow())
 }
 
-private class Spark(val x: Float, val y: Float, val s: Float, val phase: Float)
+/* ------------------------------------------------------------------ */
+/* The Encore seal.                                                    */
+/* A woven gold rosette (the kind printed on banknotes and passports   */
+/* to say "this is genuine") draws itself once around the badge, then  */
+/* small 4-point stars drift outward from it. Brand colour only.       */
+/* ------------------------------------------------------------------ */
 
-private val SparkList = listOf(
-    Spark(0.18f, 0.22f, 9f, 0.00f), Spark(0.80f, 0.18f, 12f, 0.30f),
-    Spark(0.10f, 0.58f, 7f, 0.55f), Spark(0.90f, 0.55f, 8f, 0.80f),
-    Spark(0.30f, 0.86f, 10f, 0.15f), Spark(0.72f, 0.84f, 7f, 0.65f),
-    Spark(0.50f, 0.08f, 6f, 0.45f), Spark(0.24f, 0.40f, 5f, 0.90f),
-    Spark(0.78f, 0.40f, 5f, 0.20f)
-)
+private val SealGold = Color(0xFFFFC400)
 
-@Composable
-private fun Sparkles(modifier: Modifier) {
-    val t = rememberInfiniteTransition(label = "spark").animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2800, easing = LinearEasing)),
-        label = "sparkT"
-    )
-    val gold = Color(0xFFFFC52E)
-    Canvas(modifier) {
-        val glow = size.minDimension * 0.55f
-        drawCircle(
-            Brush.radialGradient(listOf(gold.copy(alpha = 0.28f), Color.Transparent), center = center, radius = glow),
-            radius = glow,
-            center = center
-        )
-        SparkList.forEach { k ->
-            val a = ((kotlin.math.sin((t.value + k.phase) * 2.0 * Math.PI) + 1.0) / 2.0).toFloat()
-            val r = k.s.dp.toPx() * (0.55f + 0.45f * a)
-            drawPath(
-                starPath(size.width * k.x, size.height * k.y, r, r * 0.28f, 4),
-                gold.copy(alpha = 0.25f + 0.75f * a)
-            )
+/** Three interlaced wavy rings. progress 0..1 draws them clockwise from the top. */
+private fun DrawScope.drawRosette(progress: Float, radius: Float, amp: Float, color: Color) {
+    if (progress <= 0f) return
+    val lobes = 14
+    val steps = 420
+    val last = (steps * progress.coerceIn(0f, 1f)).toInt().coerceAtLeast(2)
+    val stroke = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+    for (c in 0 until 3) {
+        val path = Path()
+        for (i in 0..last) {
+            val th = -Math.PI / 2 + 2.0 * Math.PI * i / steps
+            val r = radius + amp * Math.sin(lobes * th + c * 2.0 * Math.PI / 3.0).toFloat()
+            val x = center.x + (r * Math.cos(th)).toFloat()
+            val y = center.y + (r * Math.sin(th)).toFloat()
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color, style = stroke)
+    }
+}
+
+private class StarP {
+    var x = 0f
+    var y = 0f
+    var dirX = 0f
+    var dirY = 0f
+    var born = 0L
+    var die = 0L
+    var cls = 0
+    var k = 1f
+}
+
+/**
+ * Stars are born in a ring around the badge, drift outward, fade in with a little
+ * overshoot, live 2-3 s, fade out and are born again. The whole field turns once
+ * in 40-60 s. Sizes 4 / 10 / 8 dp.
+ */
+private class StarField(count: Int) {
+    private val ps = List(count) { StarP() }
+    private val rnd = java.util.Random()
+    private val diameters = floatArrayOf(4f, 10f, 8f)
+    private var last = 0L
+    private var t0 = 0L
+    private var w = -1f
+    private var h = -1f
+
+    private fun spawn(p: StarP, now: Long, hole: Float, first: Boolean) {
+        val maxR = minOf(w, h) / 2f
+        val r = hole + rnd.nextFloat() * (maxR - hole).coerceAtLeast(1f)
+        val a = rnd.nextFloat() * 2f * Math.PI.toFloat()
+        val c = kotlin.math.cos(a)
+        val s = kotlin.math.sin(a)
+        p.x = w / 2f + r * c
+        p.y = h / 2f + r * s
+        p.dirX = c
+        p.dirY = s
+        // the first stars start at different moments so they do not all appear together
+        p.born = now + if (first) rnd.nextInt(2500).toLong() else 0L
+        p.die = p.born + 2000L + rnd.nextInt(1000)
+        p.cls = rnd.nextInt(3)
+        p.k = 0.5f + 0.5f * rnd.nextFloat()
+    }
+
+    private fun overshoot(x: Float): Float {
+        val c1 = 1.70158f
+        val c3 = c1 + 1f
+        val t = x - 1f
+        return 1f + c3 * t * t * t + c1 * t * t
+    }
+
+    fun draw(scope: DrawScope, nowMs: Long, color: Color, hole: Float, intensity: Float) {
+        with(scope) {
+            if (intensity <= 0.01f) return@with
+            if (w != size.width || h != size.height) {
+                w = size.width
+                h = size.height
+                t0 = nowMs
+                ps.forEach { spawn(it, nowMs, hole, true) }
+            }
+            val dt = if (last == 0L) 16L else (nowMs - last).coerceIn(4L, 50L)
+            last = nowMs
+            val cx = w / 2f
+            val cy = h / 2f
+            val step = 6.dp.toPx() * dt / 1000f
+            val margin = 15.dp.toPx()
+            val edge = 14.dp.toPx()
+
+            for (p in ps) {
+                if (nowMs < p.born) continue
+
+                val ang = (2.0 * Math.PI * (nowMs - t0) / (40000.0 + p.cls * 10000.0)).toFloat()
+                val ca = kotlin.math.cos(ang)
+                val sa = kotlin.math.sin(ang)
+                val dx = p.x - cx
+                val dy = p.y - cy
+                val px = cx + dx * ca - dy * sa
+                val py = cy + dx * sa + dy * ca
+
+                val inP = ((nowMs - p.born) / 200f).coerceIn(0f, 1f)
+                val out = (1f - (p.die - nowMs) / 300f).coerceIn(0f, 1f)
+                val fade = (minOf(py, h - py) / edge).coerceIn(0f, 1f)
+                val a = 0.7f * p.k * inP * (1f - out) * fade * intensity
+                val r = diameters[p.cls].dp.toPx() / 2f * overshoot(inP)
+                if (a > 0.01f && r > 0f) {
+                    val path = starPath(px, py, r, r * 0.24f, 4)
+                    val c = color.copy(alpha = a)
+                    drawPath(path, c)
+                    drawPath(path, c, style = Stroke(width = r * 0.35f, join = StrokeJoin.Round))
+                }
+
+                p.x += p.dirX * step
+                p.y += p.dirY * step
+                val outside = px < -margin || px > w + margin || py < -margin || py > h + margin
+                if (nowMs > p.die || outside) spawn(p, nowMs, hole, false)
+            }
         }
     }
+}
+
+@Composable
+private fun StarParticles(modifier: Modifier, color: Color, hole: Dp, intensity: () -> Float) {
+    val field = remember { StarField(28) }
+    var frame by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) withFrameNanos { frame = it }
+    }
+    Canvas(modifier) { field.draw(this, frame / 1_000_000L, color, hole.toPx(), intensity()) }
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,7 +374,47 @@ fun Badge(userId: String?, size: TextUnit = 14.sp, name: String? = null) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Ui.bg) {
+    val ctx = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    // if the phone has animations switched off, show the finished sheet at once
+    val calm = remember {
+        Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }
+    val medal = remember { Animatable(if (calm) 1f else 0f) }
+    val seal = remember { Animatable(if (calm) 1f else 0f) }
+    val stars = remember { Animatable(if (calm) 1f else 0f) }
+    val copy = remember { Animatable(if (calm) 1f else 0f) }
+
+    // one calm sequence, about a second: medallion settles, the seal draws itself,
+    // the text comes up, a light tick when the seal closes, then the stars begin
+    LaunchedEffect(Unit) {
+        if (calm) return@LaunchedEffect
+        launch { medal.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) }
+        launch {
+            delay(220)
+            copy.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
+        }
+        launch {
+            delay(140)
+            seal.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            stars.animateTo(1f, tween(600))
+        }
+    }
+
+    val who = name ?: "This account"
+    val detail = if (sticker != null) {
+        "$who chose this sticker as their badge. Only verified accounts can show a badge."
+    } else {
+        "Verified accounts show a gold star next to their name in chats, groups and profiles."
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Ui.bg,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -265,39 +422,83 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
                 .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(Modifier.fillMaxWidth().height(210.dp), contentAlignment = Alignment.Center) {
-                Sparkles(Modifier.matchParentSize())
-                BadgeGlyph(e, 112.dp, true, sticker)
+            // the stage: seal, stars and the badge on its medallion
+            Box(Modifier.fillMaxWidth().height(252.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.matchParentSize()) {
+                    drawRosette(seal.value, 70.dp.toPx(), 5.dp.toPx(), SealGold.copy(alpha = 0.7f))
+                }
+                if (!calm) {
+                    StarParticles(Modifier.matchParentSize(), SealGold, 84.dp) { stars.value }
+                }
+                Box(
+                    Modifier
+                        .size(112.dp)
+                        .graphicsLayer {
+                            val m = medal.value
+                            scaleX = 0.88f + 0.12f * m
+                            scaleY = 0.88f + 0.12f * m
+                            alpha = m.coerceIn(0f, 1f)
+                        }
+                        .clip(CircleShape)
+                        .background(Ui.soft)
+                        .border(1.dp, Ui.ink.copy(alpha = 0.08f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(Modifier.semantics { contentDescription = "Verified badge" }) {
+                        BadgeGlyph(e, 76.dp, true, sticker)
+                    }
+                }
             }
-            Spacer(Modifier.height(14.dp))
-            Text(
-                if (name != null) "$name is verified" else "Verified account",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (sticker == null) "Verified accounts carry the gold star next to their name. It shows in chats, groups and profiles."
-                else "${name ?: "This account"} chose this sticker as their badge. Only verified accounts can show a badge next to their name.",
-                fontSize = 14.sp,
-                color = Ui.muted,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(22.dp))
-            Text(
-                "Got it",
-                color = Ui.onInk,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
+
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Ui.ink)
-                    .clickable(onClick = onDismiss)
-                    .padding(vertical = 13.dp)
-            )
+                    .graphicsLayer {
+                        alpha = copy.value
+                        translationY = (1f - copy.value) * 10.dp.toPx()
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "Verified account",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.semantics { heading() }
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "This account has been verified by Encore.",
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                    color = Ui.muted,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    detail,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Ui.muted.copy(alpha = 0.85f),
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(28.dp))
+                Text(
+                    "OK",
+                    color = Ui.onInk,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .clip(CircleShape)
+                        .background(Ui.ink)
+                        .clickable(role = Role.Button, onClick = onDismiss)
+                        .wrapContentHeight(Alignment.CenterVertically)
+                )
+            }
         }
     }
 }
