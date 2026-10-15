@@ -308,7 +308,15 @@ fun UserPageScreen(
             ) {
                 Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 120.dp)
                 Spacer(Modifier.height(14.dp))
-                Text(peer?.displayName ?: "Unknown", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        peer?.displayName ?: "Unknown",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Badge(peer?.id, 20.sp, name = peer?.displayName)
+                }
                 val b = bio
                 if (!b.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
