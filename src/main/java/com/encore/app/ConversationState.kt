@@ -191,6 +191,16 @@ class ConversationState(
         }
     }
 
+    /** Sends a sticker from the picker: shown at once, sent from the outbox (works offline, retries). */
+    fun sendSticker(s: Sticker) {
+        val rep = replyTo
+        replyTo = null
+        problem = null
+        StickerPrefs.push(appCtx, s.id)
+        StickerCache.recentIds = StickerPrefs.recent(appCtx)
+        scope.launch(Dispatchers.IO) { Outbox.enqueueSticker(conv.id, me, s, rep) }
+    }
+
     fun sendEdited(m: EditedMedia) =
         sendMedia(m.uri, if (m.isVideo) "video" else "image", m.caption, m.ttl)
 
