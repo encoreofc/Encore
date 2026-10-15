@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -212,7 +213,16 @@ fun GroupInfoScreen(
                     Avatar(m.id, m.displayName, 44.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(if (m.id == me.id) m.displayName + " (you)" else m.displayName, fontSize = 16.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (m.id == me.id) m.displayName + " (you)" else m.displayName,
+                                fontSize = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Badge(m.id, 14.sp, name = m.displayName)
+                        }
                         Text("@" + m.username, color = Ui.muted, fontSize = 13.sp)
                     }
                     if (m.role == "owner" || m.role == "admin") {
