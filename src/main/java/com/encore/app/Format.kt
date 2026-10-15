@@ -5,6 +5,7 @@ internal fun kindLabel(k: String?): String = when (k) {
     "video" -> "Video"
     "voice" -> "Voice message"
     "file" -> "File"
+    "sticker" -> "Sticker"
     else -> "Message"
 }
 
