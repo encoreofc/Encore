@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -34,6 +36,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -233,6 +237,9 @@ fun UserPageScreen(
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmBlock by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf(false) }
+    // the photo viewer: the address of the photo in use while it is open, and where the avatar sits on screen
+    var photoUrl by remember { mutableStateOf<String?>(null) }
+    var avatarBox by remember { mutableStateOf<Rect?>(null) }
     val soon = remember { SoonState() }
     val appCtx = LocalContext.current.applicationContext
 
@@ -306,7 +313,16 @@ fun UserPageScreen(
                     .padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 120.dp)
+                val avatarNow = peer?.let { Avatars.url(it.id) }
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .clip(CircleShape)
+                        .onGloballyPositioned { avatarBox = it.boundsInRoot() }
+                        .then(if (avatarNow != null) Modifier.clickable { photoUrl = avatarNow } else Modifier)
+                ) {
+                    Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 120.dp)
+                }
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -503,6 +519,10 @@ fun UserPageScreen(
             }
         }
         SoonToast(soon, 40.dp)
+        val shownUrl = photoUrl
+        if (shownUrl != null && peer != null) {
+            ProfilePhotoViewer(peer.id, peer.username, peer.displayName, shownUrl, avatarBox) { photoUrl = null }
+        }
     }
 
     if (confirmBlock && peer != null) {
