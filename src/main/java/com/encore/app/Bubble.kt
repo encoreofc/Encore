@@ -12,17 +12,54 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+// Telegram-style text + time: the time sits at the end of the last line when it fits,
+// and drops to its own line only when there is no room.
+@Composable
+private fun TextWithMeta(text: String, meta: String, italic: Boolean, metaColor: Color) {
+    var lastLineW by remember(text) { mutableIntStateOf(0) }
+    Layout(
+        content = {
+            Text(
+                text,
+                fontSize = 16.sp,
+                fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
+                onTextLayout = { r ->
+                    lastLineW = kotlin.math.ceil(r.getLineRight(r.lineCount - 1)).toInt()
+                }
+            )
+            Text(meta, fontSize = 12.sp, color = metaColor)
+        }
+    ) { measurables, constraints ->
+        val gap = 8.dp.roundToPx()
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val t = measurables[0].measure(loose)
+        val mt = measurables[1].measure(loose)
+        val sameLine = lastLineW + gap + mt.width <= constraints.maxWidth
+        val width = if (sameLine) maxOf(t.width, lastLineW + gap + mt.width) else maxOf(t.width, mt.width)
+        val height = if (sameLine) t.height else t.height + mt.height
+        layout(width, height) {
+            t.placeRelative(0, 0)
+            mt.placeRelative(width - mt.width, height - mt.height)
+        }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -54,14 +91,17 @@ internal fun Bubble(
     val haptic = LocalHapticFeedback.current
     val isSticker = !deleted && m.kind == "sticker" && !m.body.isNullOrBlank()
     val shape = if (mine) {
-        RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
+        RoundedCornerShape(17.dp, 17.dp, 5.dp, 17.dp)
     } else {
-        RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
+        RoundedCornerShape(17.dp, 17.dp, 17.dp, 5.dp)
     }
+    val plainText = !(isVoice || isOnce || isVideo || hasMedia)
+    val meta = (if (item.editedAt != null && !deleted) "edited  " else "") +
+        clock(m.createdAt) + (if (mine && !deleted) "  $tick" else "")
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 1.dp),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
         if (isSticker) {
@@ -112,7 +152,7 @@ internal fun Bubble(
                 )
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.End
             ) {
                 if (senderName != null) {
@@ -194,19 +234,20 @@ internal fun Bubble(
                         Text(m.body, fontSize = 16.sp, modifier = Modifier.align(Alignment.Start))
                     }
                 } else {
-                    Text(
-                        if (deleted) "This message was deleted" else (m.body ?: kindLabel(m.kind)),
-                        fontSize = 16.sp,
-                        fontStyle = if (deleted) FontStyle.Italic else FontStyle.Normal
+                    TextWithMeta(
+                        text = if (deleted) "This message was deleted" else (m.body ?: kindLabel(m.kind)),
+                        meta = meta,
+                        italic = deleted,
+                        metaColor = LocalContentColor.current.copy(alpha = 0.6f)
                     )
                 }
-                val meta = (if (item.editedAt != null && !deleted) "edited  " else "") +
-                    clock(m.createdAt) + (if (mine && !deleted) "  $tick" else "")
-                Text(
-                    meta,
-                    fontSize = 11.sp,
-                    color = LocalContentColor.current.copy(alpha = 0.6f)
-                )
+                if (!plainText) {
+                    Text(
+                        meta,
+                        fontSize = 12.sp,
+                        color = LocalContentColor.current.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
         if (reactions.isNotEmpty() && !deleted) {
