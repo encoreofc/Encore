@@ -1,4 +1,4 @@
-package com.encore.app
+package com.encore.app 
 
 import android.os.Handler
 import android.os.Looper
