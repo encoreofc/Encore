@@ -66,6 +66,7 @@ fun ChatListScreen(
     OnRealtime { e ->
         when (e.optString("type")) {
             "message", "read", "hello" -> refresh()
+            "badge" -> BadgeStore.apply(e)
             else -> {}
         }
     }
@@ -155,13 +156,17 @@ fun ChatListScreen(
                         Avatar(p?.id ?: c.id, name, 52.dp)
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                name,
-                                fontSize = 16.sp,
-                                fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    name,
+                                    fontSize = 16.sp,
+                                    fontWeight = if (c.unread > 0) FontWeight.SemiBold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Badge(p?.id, name = name)
+                            }
                             Spacer(Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (mineLast) {
