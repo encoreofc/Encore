@@ -86,14 +86,20 @@ internal fun Bubble(
                 horizontalAlignment = Alignment.End
             ) {
                 if (senderName != null) {
-                    Text(
-                        senderName,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.align(Alignment.Start)
-                    )
+                    Row(
+                        modifier = Modifier.align(Alignment.Start),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            senderName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Badge(m.senderId, 12.sp, name = senderName)
+                    }
                 }
                 if (!deleted && item.fwdFrom != null) {
                     Text(
