@@ -72,7 +72,9 @@ class MainActivity : ComponentActivity() {
         val id = i.getStringExtra(CallNotification.EXTRA_CALL) ?: return
         val peer = i.getStringExtra(CallNotification.EXTRA_PEER) ?: ""
         val name = i.getStringExtra(CallNotification.EXTRA_NAME) ?: "Unknown"
+        val accept = i.getBooleanExtra(CallNotification.EXTRA_ACCEPT, false) // Answer was pressed on the banner
         i.removeExtra(CallNotification.EXTRA_CALL)
+        i.removeExtra(CallNotification.EXTRA_ACCEPT)
         CallNotification.cancel(this)
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(true)
@@ -82,7 +84,7 @@ class MainActivity : ComponentActivity() {
             // if the call turns out to be over already, do not stay visible over the lock screen
             window.decorView.postDelayed({ if (CallManager.phase == CallPhase.Idle) clearOverLock() }, 20000L)
         }
-        CallManager.incomingFromPush(id, peer, name)
+        CallManager.incomingFromPush(id, peer, name, accept)
     }
 
     private fun clearOverLock() {
