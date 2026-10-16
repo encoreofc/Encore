@@ -33,7 +33,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Telegram-style text + time: the time sits at the end of the last line when it fits,
+// Text + time: the time sits at the end of the last line when it fits,
 // and drops to its own line only when there is no room.
 @Composable
 private fun TextWithMeta(text: String, meta: String, italic: Boolean, metaColor: Color, incoming: Boolean) {
@@ -60,13 +60,13 @@ private fun TextWithMeta(text: String, meta: String, italic: Boolean, metaColor:
         val height = if (sameLine) t.height else t.height + mt.height
         layout(width, height) {
             t.placeRelative(0, 0)
-            // Telegram: time bottom is 6.5dp above the cell bottom (5dp below the last text line); incoming time sits 4dp further right
+            // time bottom is 6.5dp above the cell bottom (5dp below the last text line); incoming time sits 4dp further right
             mt.placeRelative(width - mt.width + (if (incoming) 4.dp.roundToPx() else 0), height - mt.height + 5.dp.roundToPx())
         }
     }
 }
 
-// Telegram ReactionsLayoutInBubble: chip height 26, fully rounded, gap 4 (both ways),
+// Reaction chips: height 26, fully rounded, gap 4 (both ways),
 // emoji box 20 at 8 from the left, counter 12 bold; width = 8 + 20 + 4 + counter + 8 (emoji only: 8 + 20 + 3)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -141,8 +141,11 @@ internal fun Bubble(
     val isVideo = !deleted && item.media != null && m.kind == "video"
     val hasMedia = !deleted && item.media != null && (m.kind == "image" || m.kind == "file")
     val haptic = LocalHapticFeedback.current
+    val cfg = LocalConfiguration.current
+    val mediaBubble = isVideo || (hasMedia && m.kind == "image")
+    val stickerSide = (minOf(cfg.screenWidthDp, cfg.screenHeightDp) * 0.5f).dp
     val isSticker = !deleted && m.kind == "sticker" && !m.body.isNullOrBlank()
-    // MessageDrawable: corners 17, near corners 6 on the sender's side (top when pinnedTop, bottom when pinnedBottom).
+    // Corners 17, near corners 6 on the sender's side (top when pinnedTop, bottom when pinnedBottom).
     // The last bubble of a run has no bottom corner there: the tail takes its place (drawn below).
     val topNear = if (pinnedTop) 6.dp else 17.dp
     val hasTail = !deleted && !pinnedBottom
@@ -167,7 +170,7 @@ internal fun Bubble(
             // a sticker has no bubble: it sits on the chat background, time in a small pill below
             Box(
                 modifier = Modifier
-                    .size(156.dp)
+                    .size(stickerSide)
                     .clip(RoundedCornerShape(20.dp))
                     .combinedClickable(
                         onClick = {},
@@ -198,9 +201,9 @@ internal fun Bubble(
             shape = shape,
             border = if (deleted) BorderStroke(1.dp, Ui.line) else null,
             modifier = Modifier
-                .widthIn(max = (LocalConfiguration.current.screenWidthDp - 80 + 18).dp) // Telegram text width = screen - 80, plus 11 + 7 padding
+                .widthIn(max = (if (mediaBubble) cfg.screenWidthDp - 46 else cfg.screenWidthDp - 62).dp) // text: screen - 80 plus 18 padding; photo/video: screen - 64 plus 18 padding
                 .drawBehind {
-                    // MessageDrawable tail: the side edge runs down to 11dp above the bottom, then flares out
+                    // Tail: the side edge runs down to 11dp above the bottom, then flares out
                     // along a 13 x 20dp ellipse (-83 degrees) to a tip 5.4dp outside the body at the bottom edge.
                     if (hasTail) {
                         val x0 = if (mine) size.width else 0f
@@ -319,7 +322,7 @@ internal fun Bubble(
                         Text(m.body, fontSize = fs(16f), modifier = Modifier.align(Alignment.Start))
                     }
                 } else if (showReactions) {
-                    // Telegram: reactions inside the bubble, 7.5dp under the text, time on the same bottom row
+                    // reactions inside the bubble, 7.5dp under the text, time on the same bottom row
                     Text(
                         m.body ?: kindLabel(m.kind),
                         fontSize = fs(16f),
