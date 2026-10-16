@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -38,13 +39,13 @@ private fun TextWithMeta(text: String, meta: String, italic: Boolean, metaColor:
         content = {
             Text(
                 text,
-                fontSize = 16.sp,
+                fontSize = fs(16f),
                 fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
                 onTextLayout = { r ->
                     lastLineW = kotlin.math.ceil(r.getLineRight(r.lineCount - 1)).toInt()
                 }
             )
-            Text(meta, fontSize = 12.sp, color = metaColor)
+            Text(meta, fontSize = fs(12f), color = metaColor)
         }
     ) { measurables, constraints ->
         val gap = 8.dp.roundToPx()
@@ -139,7 +140,7 @@ internal fun Bubble(
             shape = shape,
             border = if (deleted) BorderStroke(1.dp, Ui.line) else null,
             modifier = Modifier
-                .widthIn(max = 290.dp)
+                .widthIn(max = (LocalConfiguration.current.screenWidthDp - 80).dp)
                 .clip(shape)
                 .combinedClickable(
                     onClick = {},
@@ -152,7 +153,7 @@ internal fun Bubble(
                 )
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                modifier = Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp, bottom = 11.5.dp),
                 horizontalAlignment = Alignment.End
             ) {
                 if (senderName != null) {
@@ -162,19 +163,19 @@ internal fun Bubble(
                     ) {
                         Text(
                             senderName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontSize = fs(14f),
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        Badge(m.senderId, 12.sp, name = senderName)
+                        Badge(m.senderId, fs(14f), name = senderName)
                     }
                 }
                 if (!deleted && item.fwdFrom != null) {
                     Text(
                         "Forwarded from ${item.fwdFrom}",
-                        fontSize = 12.sp,
+                        fontSize = fs(14f),
                         fontStyle = FontStyle.Italic,
                         color = LocalContentColor.current.copy(alpha = 0.7f),
                         modifier = Modifier.align(Alignment.Start)
@@ -197,11 +198,11 @@ internal fun Bubble(
                         )
                         Spacer(Modifier.width(8.dp))
                         Column {
-                            Text(replyName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(replyName, fontSize = fs(14f), fontWeight = FontWeight.Medium)
                             Text(
                                 if (reply == null || reply.deleted) "Message unavailable"
                                 else msgPreview(reply.kind, reply.body),
-                                fontSize = 13.sp,
+                                fontSize = fs(14f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 color = LocalContentColor.current.copy(alpha = 0.8f)
@@ -223,7 +224,7 @@ internal fun Bubble(
                     }
                     if (!m.body.isNullOrBlank()) {
                         Spacer(Modifier.height(6.dp))
-                        Text(m.body, fontSize = 16.sp, modifier = Modifier.align(Alignment.Start))
+                        Text(m.body, fontSize = fs(16f), modifier = Modifier.align(Alignment.Start))
                     }
                 } else if (hasMedia) {
                     Box(modifier = Modifier.align(Alignment.Start)) {
@@ -231,7 +232,7 @@ internal fun Bubble(
                     }
                     if (!m.body.isNullOrBlank()) {
                         Spacer(Modifier.height(6.dp))
-                        Text(m.body, fontSize = 16.sp, modifier = Modifier.align(Alignment.Start))
+                        Text(m.body, fontSize = fs(16f), modifier = Modifier.align(Alignment.Start))
                     }
                 } else {
                     TextWithMeta(
@@ -244,7 +245,7 @@ internal fun Bubble(
                 if (!plainText) {
                     Text(
                         meta,
-                        fontSize = 12.sp,
+                        fontSize = fs(12f),
                         color = LocalContentColor.current.copy(alpha = 0.6f)
                     )
                 }
