@@ -273,7 +273,7 @@ fun MediaBlock(cid: String, item: MsgItem, progress: Float?, onImage: () -> Unit
     val m = item.media ?: return
     val ctx = LocalContext.current
     if (item.msg.kind == "image") {
-        val ratio = if (m.w > 0 && m.h > 0) (m.h.toFloat() / m.w).coerceIn(0.6f, 1.5f) else 1f
+        val (bw, bh) = mediaBoxSize(m)
         val data: Any = m.localUri?.let { Uri.parse(it) } ?: Uploads.url(cid, item.msg.id)
         val req = remember(data) {
             ImageRequest.Builder(ctx)
@@ -284,8 +284,8 @@ fun MediaBlock(cid: String, item: MsgItem, progress: Float?, onImage: () -> Unit
         }
         Box(
             modifier = Modifier
-                .width(240.dp)
-                .height((240f * ratio).dp)
+                .width(bw)
+                .height(bh)
                 .clip(RoundedCornerShape(12.dp))
                 .clickable(enabled = progress == null) { onImage() }
         ) {
