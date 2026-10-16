@@ -20,6 +20,7 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
@@ -377,29 +378,29 @@ fun ConversationScreen(
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 11.dp, vertical = 8.dp), // Telegram: bubble body sits 11dp from the screen edge
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                items(rev, key = { if (it is MsgItem) it.msg.id else it }) { row ->
+                itemsIndexed(rev, key = { _, it -> if (it is MsgItem) it.msg.id else it }) { index, row ->
                     if (row is String) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Telegram-style date pill: 14sp bold text, 11dp corners
+                            // Telegram ChatActionCell: 14 bold, corner 11, padding 8 x 3, 4dp cell margin
                             Text(
                                 row,
-                                fontSize = 14.sp,
+                                fontSize = fs(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = Ui.muted,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(11.dp))
                                     .background(Ui.soft)
-                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
                     } else if (row is MsgItem) {
@@ -408,25 +409,27 @@ fun ConversationScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 6.dp, horizontal = 24.dp),
+                                    .padding(vertical = 4.dp, horizontal = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Telegram-style service pill: 14sp bold, 11dp corners, max width 272dp
+                                // Telegram ChatActionCell: max width = screen - 30dp (list padding 11+11, +4+4 here)
                                 Text(
                                     m.body ?: "",
-                                    fontSize = 14.sp,
+                                    fontSize = fs(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = Ui.muted,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier
-                                        .widthIn(max = 272.dp)
                                         .clip(RoundedCornerShape(11.dp))
                                         .background(Ui.soft)
-                                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
                             }
                         } else {
                             val mine = m.senderId == me.id
+                            // Telegram groups a run: same sender, within 5 minutes. rev is newest-first.
+                            val pinnedBottom = sameRun(row, rev.getOrNull(index - 1))
+                            val pinnedTop = sameRun(row, rev.getOrNull(index + 1))
                             val local = m.id.startsWith("local-")
                             val seen = mine && !isGroup && !local && st.peerRead.isNotEmpty() && m.id <= st.peerRead
                             val tick = if (!mine) "" else if (local) "…" else if (seen) "✓✓" else "✓"
@@ -437,7 +440,7 @@ fun ConversationScreen(
                             val replyName = if (reply?.senderId == me.id) "You"
                             else if (isGroup) (members[reply?.senderId]?.displayName ?: "Member")
                             else (peer?.displayName ?: "Unknown")
-                            val senderName = if (isGroup && !mine) (members[m.senderId]?.displayName ?: "…") else null
+                            val senderName = if (isGroup && !mine && !pinnedTop) (members[m.senderId]?.displayName ?: "…") else null
                             Bubble(
                                 cid = conv.id,
                                 item = row,
@@ -455,7 +458,9 @@ fun ConversationScreen(
                                 onImage = { viewer = row },
                                 onFile = { row.media?.let { Uploads.download(ctx, conv.id, m.id, it.name) } },
                                 onVideo = { player = row },
-                                onOnce = { st.openOnce(row) { once = it } }
+                                onOnce = { st.openOnce(row) { once = it } },
+                                pinnedTop = pinnedTop,
+                                pinnedBottom = pinnedBottom
                             )
                         }
                     }
@@ -643,4 +648,44 @@ fun ConversationScreen(
             onDismiss = { forwarding = null }
         )
     }
+}
+
+
+// createdAt's type lives outside the files I was given, so this accepts a number
+// (seconds or milliseconds) or a string (digits or ISO-8601). If it can't be read, nothing is grouped.
+private val isoRe = Regex("""(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?""")
+
+private fun parseIso(s: String): Long? {
+    val g = isoRe.find(s)?.groupValues ?: return null
+    val cal = java.util.GregorianCalendar(java.util.TimeZone.getTimeZone("UTC"))
+    cal.clear()
+    cal.set(g[1].toInt(), g[2].toInt() - 1, g[3].toInt(), g[4].toInt(), g[5].toInt(), g[6].toInt())
+    var ms = cal.timeInMillis
+    if (g[7].isNotEmpty()) ms += (("0." + g[7]).toDouble() * 1000).toLong()
+    val tz = g[8]
+    if (tz.isNotEmpty() && tz != "Z") {
+        val sign = if (tz[0] == '-') -1 else 1
+        val d = tz.substring(1).replace(":", "")
+        ms -= sign * (d.substring(0, 2).toInt() * 60 + d.substring(2, 4).toInt()) * 60_000L
+    }
+    return ms
+}
+
+private fun msgMillis(item: MsgItem): Long? {
+    val v: Any? = item.msg.createdAt
+    fun norm(n: Long) = if (n < 100_000_000_000L) n * 1000 else n
+    return when (v) {
+        is Number -> norm(v.toLong())
+        is String -> v.toLongOrNull()?.let { norm(it) } ?: parseIso(v)
+        else -> null
+    }
+}
+
+private fun sameRun(a: Any?, b: Any?): Boolean {
+    if (a !is MsgItem || b !is MsgItem) return false
+    if (a.msg.kind == "system" || b.msg.kind == "system") return false
+    if (a.msg.senderId != b.msg.senderId) return false
+    val ta = msgMillis(a) ?: return false
+    val tb = msgMillis(b) ?: return false
+    return kotlin.math.abs(ta - tb) <= 5 * 60 * 1000L
 }
