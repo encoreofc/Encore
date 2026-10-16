@@ -35,7 +35,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -44,7 +43,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -52,132 +50,6 @@ import coil.request.ImageRequest
 
 private val UserPageYellow = Color(0xFFFFC400)
 private val UserPageOnYellow = Color(0xFF111111)
-
-/* ------------------------------------------------------------------ /
-/ twinkling gold stars, same as the verified badge sheet               /
-/ ------------------------------------------------------------------ */
-
-private fun profileStarPath(cx: Float, cy: Float, outer: Float, inner: Float, points: Int): Path {
-    val p = Path()
-    val n = points * 2
-    for (i in 0 until n) {
-        val r = if (i % 2 == 0) outer else inner
-        val a = Math.PI * i / points - Math.PI / 2
-        val x = cx + (r * Math.cos(a)).toFloat()
-        val y = cy + (r * Math.sin(a)).toFloat()
-        if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
-    }
-    p.close()
-    return p
-}
-
-private class ProfileStarP {
-    var x = 0f
-    var y = 0f
-    var dirX = 0f
-    var dirY = 0f
-    var born = 0L
-    var die = 0L
-    var cls = 0
-    var k = 1f
-}
-
-/**
- * Stars are born in a ring around the badge, drift outward, fade in with a little
- * overshoot, live 2-3 s, fade out and are born again. The whole field turns once
- * in 40-60 s. Sizes 4 / 10 / 8 dp.
- */
-private class ProfileStarField(count: Int) {
-    private val ps = List(count) { ProfileStarP() }
-    private val rnd = java.util.Random()
-    private val diameters = floatArrayOf(4f, 10f, 8f)
-    private var last = 0L
-    private var t0 = 0L
-    private var w = -1f
-    private var h = -1f
-
-    private fun spawn(p: ProfileStarP, now: Long, hole: Float, first: Boolean) {
-        val maxR = minOf(w, h) / 2f
-        val r = hole + rnd.nextFloat() * (maxR - hole).coerceAtLeast(1f)
-        val a = rnd.nextFloat() * 2f * Math.PI.toFloat()
-        val c = kotlin.math.cos(a)
-        val s = kotlin.math.sin(a)
-        p.x = w / 2f + r * c
-        p.y = h / 2f + r * s
-        p.dirX = c
-        p.dirY = s
-        // the first stars start at different moments so they do not all appear together
-        p.born = now + if (first) rnd.nextInt(300).toLong() else 0L
-        p.die = p.born + 2000L + rnd.nextInt(1000)
-        p.cls = rnd.nextInt(3)
-        p.k = 0.5f + 0.5f * rnd.nextFloat()
-    }
-
-    private fun overshoot(x: Float): Float {
-        val c1 = 1.70158f
-        val c3 = c1 + 1f
-        val t = x - 1f
-        return 1f + c3 * t * t * t + c1 * t * t
-    }
-
-    fun draw(scope: DrawScope, nowMs: Long, color: Color, hole: Float, intensity: Float) {
-        with(scope) {
-            if (intensity <= 0.01f) return@with
-            if (w != size.width || h != size.height) {
-                w = size.width
-                h = size.height
-                t0 = nowMs
-                ps.forEach { spawn(it, nowMs, hole, true) }
-            }
-            val dt = if (last == 0L) 16L else (nowMs - last).coerceIn(4L, 50L)
-            last = nowMs
-            val cx = w / 2f
-            val cy = h / 2f
-            val step = 6.dp.toPx() * dt / 1000f
-            val margin = 15.dp.toPx()
-            val edge = 14.dp.toPx()
-
-            for (p in ps) {
-                if (nowMs < p.born) continue
-
-                val ang = (2.0 * Math.PI * (nowMs - t0) / (40000.0 + p.cls * 10000.0)).toFloat()
-                val ca = kotlin.math.cos(ang)
-                val sa = kotlin.math.sin(ang)
-                val dx = p.x - cx
-                val dy = p.y - cy
-                val px = cx + dx * ca - dy * sa
-                val py = cy + dx * sa + dy * ca
-
-                val inP = ((nowMs - p.born) / 200f).coerceIn(0f, 1f)
-                val out = (1f - (p.die - nowMs) / 300f).coerceIn(0f, 1f)
-                val fade = (minOf(py, h - py) / edge).coerceIn(0f, 1f)
-                val a = 0.7f * p.k * inP * (1f - out) * fade * intensity
-                val r = diameters[p.cls].dp.toPx() / 2f * overshoot(inP)
-                if (a > 0.01f && r > 0f) {
-                    val path = profileStarPath(px, py, r, r * 0.24f, 4)
-                    val c = color.copy(alpha = a)
-                    drawPath(path, c)
-                    drawPath(path, c, style = Stroke(width = r * 0.35f, join = StrokeJoin.Round))
-                }
-
-                p.x += p.dirX * step
-                p.y += p.dirY * step
-                val outside = px < -margin || px > w + margin || py < -margin || py > h + margin
-                if (nowMs > p.die || outside) spawn(p, nowMs, hole, false)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProfileStarParticles(modifier: Modifier, color: Color, hole: Dp, intensity: () -> Float) {
-    val field = remember { ProfileStarField(28) }
-    var frame by remember { mutableStateOf(0L) }
-    LaunchedEffect(Unit) {
-        while (true) withFrameNanos { frame = it }
-    }
-    Canvas(modifier) { field.draw(this, frame / 1_000_000L, color, hole.toPx(), intensity()) }
-}
 
 @Composable
 private fun GalleryGlyph(color: Color) {
@@ -431,7 +303,7 @@ fun UserPageScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val avatarNow = peer?.let { Avatars.url(it.id) }
-                // a round photo at the top, the gold stars twinkle behind it
+                // a round photo at the top
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -439,7 +311,6 @@ fun UserPageScreen(
                         .height(252.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    ProfileStarParticles(Modifier.matchParentSize(), UserPageYellow, 84.dp) { 1f }
                     Box(
                         modifier = Modifier
                             .size(112.dp)
