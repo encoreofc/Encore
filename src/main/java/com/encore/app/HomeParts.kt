@@ -179,7 +179,7 @@ internal fun StartChatDialog(onDismiss: () -> Unit, onStarted: (Conv) -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Ui.bg,
+        containerColor = glassDialogColor(),
         title = { Text("New chat") },
         text = {
             Column {
@@ -207,7 +207,7 @@ internal fun ThemeDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Ui.bg,
+        containerColor = glassDialogColor(),
         title = { Text("Theme") },
         text = {
             Column {
