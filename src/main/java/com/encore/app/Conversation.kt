@@ -624,7 +624,7 @@ fun ConversationScreen(
     confirmDelete?.let { x ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
-            containerColor = Ui.bg,
+            containerColor = glassDialogColor(),
             title = { Text("Delete message?") },
             text = { Text("This removes it for everyone in the chat.") },
             confirmButton = {
