@@ -17,14 +17,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val BadgeYellow = Color(0xFFFFC400)
+// champagne gold palette (replaces the flat bright yellow)
+private val GoldLight = Color(0xFFF5D98B)
+private val BadgeYellow = Color(0xFFE8B84A)
+private val GoldDeep = Color(0xFFC9962B)
+private val GoldInk = Color(0xFF1A1405)
 
 // text size is fixed in dp, so the phone font size setting does not change it
 @Composable
@@ -36,12 +42,18 @@ private fun isGroupChat(c: Conv): Boolean = false
 @Composable
 private fun EncoreChip(label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
+    val fill: Brush = if (selected)
+        Brush.verticalGradient(listOf(GoldLight.copy(alpha = 0.32f), GoldDeep.copy(alpha = 0.14f)))
+    else SolidColor(Color.Transparent)
+    val rim: Brush = if (selected)
+        Brush.verticalGradient(listOf(GoldLight.copy(alpha = 0.95f), GoldDeep.copy(alpha = 0.45f)))
+    else SolidColor(Ui.line)
     Row(
         modifier = Modifier
             .height(28.dp)
             .clip(shape)
-            .background(if (selected) BadgeYellow.copy(alpha = 0.18f) else Color.Transparent)
-            .border(1.dp, if (selected) BadgeYellow else Ui.line, shape)
+            .background(fill)
+            .border(1.dp, rim, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.5.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -179,25 +191,24 @@ fun ChatListScreen(
             // your own story sits in the header; other people's stories show as rings on their avatars
 
             // search pill (opens the same Search screen as before)
-            // search field: 48dp box, 7dp side margin, 3dp inner padding, 20dp radius, 24dp icon, 15 text starting at 48dp
+            // search field (Telegram style): 56dp box, full pill (26dp radius), glass fill, 24dp icon, 16 text
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 7.dp)
-                    .padding(3.dp)
+                    .height(56.dp)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .glassSurface(RoundedCornerShape(20.dp))
+                        .glassSurface(RoundedCornerShape(26.dp), strong = true)
                         .clickable { onSearch() }
-                        .padding(start = 12.dp),
+                        .padding(start = 18.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.muted, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Search chats and people", color = Ui.muted, fontSize = fs(15f))
+                    Spacer(Modifier.width(14.dp))
+                    Text("Search chats and people", color = Ui.muted, fontSize = fs(16f))
                 }
             }
 
@@ -227,7 +238,7 @@ fun ChatListScreen(
                 )
             }
 
-            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp)) {
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 96.dp)) {
                 items(shown, key = { it.id }) { c ->
                     val p = c.peer
                     val name = p?.displayName ?: "Unknown"
@@ -298,7 +309,7 @@ fun ChatListScreen(
                                 ) {
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
-                                        color = if (c.muted) Ui.onInk else Color(0xFF111111),
+                                        color = if (c.muted) Ui.onInk else GoldInk,
                                         fontSize = fs(13f),
                                         fontWeight = FontWeight.Bold
                                     )
@@ -350,11 +361,21 @@ fun ChatListScreen(
                         .height(44.dp)
                         .clip(RoundedCornerShape(22.dp))
                         .background(Ui.ink)
+                        .border(
+                            1.dp,
+                            Brush.verticalGradient(listOf(GoldLight.copy(alpha = 0.9f), GoldDeep.copy(alpha = 0.4f))),
+                            RoundedCornerShape(22.dp)
+                        )
                         .clickable { sheet = true }
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Ui.onInk, modifier = Modifier.size(24.dp))
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = if (LocalPalette.current.dark) Ui.onInk else BadgeYellow,
+                        modifier = Modifier.size(24.dp)
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text("New Chat", color = Ui.onInk, fontSize = fs(16f), fontWeight = FontWeight.Medium)
                 }
@@ -368,18 +389,24 @@ fun ChatListScreen(
         }
 
         // story "+" (moved here from the header), floats above the New Chat bar
-        FloatingActionButton(
-            onClick = onAddStory,
-            containerColor = BadgeYellow,
-            contentColor = Color(0xFF111111),
-            shape = CircleShape,
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
                 .padding(end = 20.dp, bottom = 78.dp)
                 .size(48.dp)
+                .shadow(8.dp, CircleShape, ambientColor = GoldDeep, spotColor = GoldDeep)
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(GoldLight.copy(alpha = 0.95f), GoldDeep.copy(alpha = 0.9f))))
+                .border(
+                    1.dp,
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.7f), Color.White.copy(alpha = 0.05f))),
+                    CircleShape
+                )
+                .clickable { onAddStory() },
+            contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add story")
+            Icon(Icons.Default.Add, contentDescription = "Add story", tint = GoldInk)
         }
 
         SoonToast(soon, 84.dp)
