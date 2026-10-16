@@ -73,6 +73,7 @@ fun ChatListScreen(
     onAddStory: () -> Unit
 ) {
     // the chat list comes from the local database (kept up to date by Sync), so it shows instantly and works offline
+    var filter by remember { mutableStateOf(0) } // 0 All, 1 Unread, 2 Groups
     val chatsFlow = remember { Sync.convFlow() }
     val chatsState by chatsFlow.collectAsState(initial = null as List<Conv>?)
     val chats: List<Conv> = chatsState ?: emptyList()
@@ -86,7 +87,6 @@ fun ChatListScreen(
     var sheet by remember { mutableStateOf(false) }
     var startDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    var filter by remember { mutableStateOf(0) } // 0 All, 1 Unread, 2 Groups
     val soon = remember { SoonState() }
 
     fun refresh() {
