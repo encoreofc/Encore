@@ -2,21 +2,30 @@ package com.encore.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 
-// ছবি/ভিডিওর বক্সের মাপ: ল্যান্ডস্কেপে স্ক্রিন-৬৪dp, নাহলে ৭০%,
-// উচ্চতা অনুপাত ধরে, সর্বনিম্ন ১২০dp, সর্বোচ্চ প্রস্থ+১০০dp
+// ছবি/ভিডিওর বক্সের মাপ
 @Composable
 fun mediaBoxSize(m: Media?): Pair<Dp, Dp> {
-    val screen = LocalConfiguration.current.screenWidthDp.dp
-    val w0 = m?.w ?: 0
-    val h0 = m?.h ?: 0
-    if (w0 <= 0 || h0 <= 0) return 240.dp to 150.dp
-    val width = if (w0 >= h0) screen - 64.dp else screen * 0.7f
-    val height = (width * h0 / w0).coerceIn(120.dp, width + 100.dp)
-    return width to height
+    val cfg = LocalConfiguration.current
+    val base = minOf(cfg.screenWidthDp, cfg.screenHeightDp).dp
+    val cap = (1280f / LocalDensity.current.density).dp
+    val iw = m?.w ?: 0
+    val ih = m?.h ?: 0
+    if (iw <= 0 || ih <= 0) return 240.dp to 150.dp
+    val landscape = iw >= ih
+    val w0 = if (landscape) base - 64.dp else base * 0.7f
+    val h0 = w0 + 100.dp
+    val photoW = if (!landscape && w0 > cap) cap else w0
+    val photoH = if (!landscape && h0 > cap) cap else h0
+    val h = photoW * ih / iw
+    return if (h > photoH) {
+        (photoW * (photoH / h)) to photoH
+    } else {
+        photoW to maxOf(h, 120.dp)
+    }
 }
 
 object ListDims {
