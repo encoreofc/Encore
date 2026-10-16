@@ -63,10 +63,11 @@ fun VideoBlock(item: MsgItem, progress: Float?, onPlay: () -> Unit) {
     val m = item.media
     val ctx = LocalContext.current
     val local = m?.localUri
+    val (bw, bh) = mediaBoxSize(m)
     Box(
         modifier = Modifier
-            .width(240.dp)
-            .height(150.dp)
+            .width(bw)
+            .height(bh)
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF1B1D21))
             .clickable(enabled = progress == null) { onPlay() },
