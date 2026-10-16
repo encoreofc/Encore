@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +40,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -68,44 +70,51 @@ private fun ConversationHeader(
     soon: SoonState,
     onCall: () -> Unit
 ) {
+    // Telegram chat header: 56dp bar, back button 54dp wide with a 24dp icon, 42dp avatar starting 60dp from the edge,
+    // title 18 / subtitle 14 starting 13dp after the avatar, menu buttons 48dp with 24dp icons
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 6.dp),
+            .height(56.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Ui.ink)
+        Box(
+            modifier = Modifier
+                .size(54.dp, 56.dp)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Ui.ink, modifier = Modifier.size(24.dp))
         }
+        Spacer(Modifier.width(6.dp))
         Row(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(12.dp))
-                .clickable { onInfo() }
-                .padding(vertical = 2.dp),
+                .clickable { onInfo() },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Avatar(peer?.id ?: convId, peer?.displayName ?: "?", 40.dp)
-            Spacer(Modifier.width(10.dp))
+            Avatar(peer?.id ?: convId, peer?.displayName ?: "?", 42.dp)
+            Spacer(Modifier.width(13.dp))
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         peer?.displayName ?: "Unknown",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = fs(18f),
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     Badge(peer?.id, name = peer?.displayName)
                 }
                 if (subtitle.isNotEmpty()) {
-                    Text(subtitle, fontSize = 12.sp, color = if (typing) Ui.ink else Ui.muted)
+                    Text(subtitle, fontSize = fs(14f), color = if (typing) Ui.ink else Ui.muted, maxLines = 1)
                 }
             }
         }
-        IconButton(onClick = { soon.show("Video calls") }) { VideoIcon(Ui.ink) }
-        IconButton(onClick = onCall) {
-            Icon(Icons.Default.Call, contentDescription = "Call", tint = Ui.ink)
+        IconButton(onClick = { soon.show("Video calls") }, modifier = Modifier.size(48.dp)) { VideoIcon(Ui.ink) }
+        IconButton(onClick = onCall, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.Default.Call, contentDescription = "Call", tint = Ui.ink, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -128,44 +137,57 @@ private fun Composer(
         RecordingBar(voice)
         return
     }
+    // Telegram input bar: buttons 44x44dp, field at least 44dp tall with 18 text, 24dp icons
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Bottom
     ) {
-        IconButton(onClick = onAttach) {
-            Icon(Icons.Default.Add, contentDescription = "Attach", tint = Ui.ink)
+        IconButton(onClick = onAttach, modifier = Modifier.size(44.dp)) {
+            Icon(Icons.Default.Add, contentDescription = "Attach", tint = Ui.ink, modifier = Modifier.size(24.dp))
         }
-        TextField(
+        BasicTextField(
             value = st.text,
             onValueChange = { st.onTextChange(it) },
-            placeholder = { Text("Message", color = Ui.muted, fontSize = 18.sp) },
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = fs(18f), color = Ui.ink),
+            cursorBrush = SolidColor(Ui.ink),
             interactionSource = src,
-            leadingIcon = {
-                // sticker button inside the field, left side; turns into a keyboard button while the panel is open
-                IconButton(onClick = onSticker) {
-                    Crossfade(panelOpen, animationSpec = tween(150), label = "stk") { open ->
-                        if (open) KeyboardGlyph(Ui.ink) else StickerGlyph(Ui.ink)
+            maxLines = 4,
+            modifier = Modifier.weight(1f).focusRequester(focus),
+            decorationBox = { inner ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Ui.soft),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    // sticker button inside the field, left side; turns into a keyboard button while the panel is open
+                    IconButton(onClick = onSticker, modifier = Modifier.size(44.dp)) {
+                        Crossfade(panelOpen, animationSpec = tween(150), label = "stk") { open ->
+                            if (open) KeyboardGlyph(Ui.ink) else StickerGlyph(Ui.ink)
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 16.dp, top = 11.dp, bottom = 11.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (st.text.isEmpty()) {
+                            Text("Message", color = Ui.muted, fontSize = fs(18f))
+                        }
+                        inner()
                     }
                 }
-            },
-            shape = RoundedCornerShape(24.dp),
-            maxLines = 4,
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Ui.soft,
-                unfocusedContainerColor = Ui.soft,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                disabledIndicatorColor = Color.Transparent
-            ),
-            modifier = Modifier.weight(1f).focusRequester(focus)
+            }
         )
         if (st.text.isBlank()) {
-            IconButton(onClick = { voice.onMicClick() }) { MicIcon(Ui.ink) }
+            IconButton(onClick = { voice.onMicClick() }, modifier = Modifier.size(44.dp)) { MicIcon(Ui.ink) }
         } else {
-            IconButton(onClick = { st.send() }) {
+            IconButton(onClick = { st.send() }, modifier = Modifier.size(44.dp)) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
