@@ -16,7 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -26,11 +28,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// champagne gold palette (replaces the flat bright yellow)
-private val GoldLight = Color(0xFFF5D98B)
-private val BadgeYellow = Color(0xFFE8B84A)
-private val GoldDeep = Color(0xFFC9962B)
-private val GoldInk = Color(0xFF1A1405)
+private val BadgeYellow = Color(0xFFFFC400)
+
+// champagne gold for the glass look (chips and the story "+"); BadgeYellow above is untouched
+private val GoldLight = Color(0xFFFFE08C)
+private val Gold = Color(0xFFF2B136)
+private val GoldDeep = Color(0xFFC98400)
+
+// thin specular light along the top edge, the detail that makes a surface read as glass
+private fun Modifier.topSheen(alpha: Float): Modifier = drawWithContent {
+    drawContent()
+    val inset = size.height * 0.45f
+    drawLine(
+        brush = Brush.horizontalGradient(
+            listOf(Color.Transparent, Color.White.copy(alpha = alpha), Color.Transparent)
+        ),
+        start = Offset(inset, 1.dp.toPx()),
+        end = Offset(size.width - inset, 1.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+    )
+}
 
 // text size is fixed in dp, so the phone font size setting does not change it
 @Composable
@@ -42,18 +59,23 @@ private fun isGroupChat(c: Conv): Boolean = false
 @Composable
 private fun EncoreChip(label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
-    val fill: Brush = if (selected)
-        Brush.verticalGradient(listOf(GoldLight.copy(alpha = 0.32f), GoldDeep.copy(alpha = 0.14f)))
-    else SolidColor(Color.Transparent)
-    val rim: Brush = if (selected)
-        Brush.verticalGradient(listOf(GoldLight.copy(alpha = 0.95f), GoldDeep.copy(alpha = 0.45f)))
-    else SolidColor(Ui.line)
+    // selected: gold-infused glass (honey core, bright-to-deep gold rim); not selected: clean glass
+    val goldCore = Brush.verticalGradient(
+        listOf(Gold.copy(alpha = 0.40f), GoldDeep.copy(alpha = 0.18f))
+    )
+    val rim: Brush = if (selected) {
+        Brush.linearGradient(listOf(GoldLight, GoldDeep.copy(alpha = 0.75f)))
+    } else {
+        SolidColor(Ui.line)
+    }
     Row(
         modifier = Modifier
             .height(28.dp)
             .clip(shape)
-            .background(fill)
+            .glassSurface(shape)
+            .then(if (selected) Modifier.background(goldCore) else Modifier)
             .border(1.dp, rim, shape)
+            .topSheen(if (selected) 0.85f else 0.5f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.5.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -191,24 +213,25 @@ fun ChatListScreen(
             // your own story sits in the header; other people's stories show as rings on their avatars
 
             // search pill (opens the same Search screen as before)
-            // search field (Telegram style): 56dp box, full pill (26dp radius), glass fill, 24dp icon, 16 text
+            // search field: 48dp box, 7dp side margin, 3dp inner padding, 20dp radius, 24dp icon, 15 text starting at 48dp
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .height(48.dp)
+                    .padding(horizontal = 7.dp)
+                    .padding(3.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .glassSurface(RoundedCornerShape(26.dp), strong = true)
+                        .glassSurface(RoundedCornerShape(20.dp))
                         .clickable { onSearch() }
-                        .padding(start = 18.dp),
+                        .padding(start = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.muted, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(14.dp))
-                    Text("Search chats and people", color = Ui.muted, fontSize = fs(16f))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Search chats and people", color = Ui.muted, fontSize = fs(15f))
                 }
             }
 
@@ -238,7 +261,7 @@ fun ChatListScreen(
                 )
             }
 
-            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 96.dp)) {
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp)) {
                 items(shown, key = { it.id }) { c ->
                     val p = c.peer
                     val name = p?.displayName ?: "Unknown"
@@ -309,7 +332,7 @@ fun ChatListScreen(
                                 ) {
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
-                                        color = if (c.muted) Ui.onInk else GoldInk,
+                                        color = if (c.muted) Ui.onInk else Color(0xFF111111),
                                         fontSize = fs(13f),
                                         fontWeight = FontWeight.Bold
                                     )
@@ -361,21 +384,11 @@ fun ChatListScreen(
                         .height(44.dp)
                         .clip(RoundedCornerShape(22.dp))
                         .background(Ui.ink)
-                        .border(
-                            1.dp,
-                            Brush.verticalGradient(listOf(GoldLight.copy(alpha = 0.9f), GoldDeep.copy(alpha = 0.4f))),
-                            RoundedCornerShape(22.dp)
-                        )
                         .clickable { sheet = true }
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = null,
-                        tint = if (LocalPalette.current.dark) Ui.onInk else BadgeYellow,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Ui.onInk, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("New Chat", color = Ui.onInk, fontSize = fs(16f), fontWeight = FontWeight.Medium)
                 }
@@ -395,18 +408,33 @@ fun ChatListScreen(
                 .navigationBarsPadding()
                 .padding(end = 20.dp, bottom = 78.dp)
                 .size(48.dp)
-                .shadow(8.dp, CircleShape, ambientColor = GoldDeep, spotColor = GoldDeep)
+                .shadow(
+                    14.dp,
+                    CircleShape,
+                    ambientColor = GoldDeep.copy(alpha = 0.40f),
+                    spotColor = GoldDeep.copy(alpha = 0.55f)
+                )
                 .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(GoldLight.copy(alpha = 0.95f), GoldDeep.copy(alpha = 0.9f))))
+                // body: champagne gold, brighter at the top-left, deeper at the bottom-right
+                .background(Brush.linearGradient(listOf(GoldLight, Gold, GoldDeep)))
+                // glass layer: light catching the top half, soft depth at the bottom
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = 0.45f),
+                        0.5f to Color.Transparent,
+                        1f to GoldDeep.copy(alpha = 0.30f)
+                    )
+                )
+                // rim light
                 .border(
                     1.dp,
-                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.7f), Color.White.copy(alpha = 0.05f))),
+                    Brush.linearGradient(listOf(Color.White.copy(alpha = 0.9f), Color.White.copy(alpha = 0.1f))),
                     CircleShape
                 )
-                .clickable { onAddStory() },
+                .clickable(onClick = onAddStory),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add story", tint = GoldInk)
+            Icon(Icons.Default.Add, contentDescription = "Add story", tint = Color(0xFF1A1200))
         }
 
         SoonToast(soon, 84.dp)
