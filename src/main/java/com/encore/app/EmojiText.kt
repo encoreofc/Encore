@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -88,9 +89,8 @@ fun rememberEmojiTransformation(): VisualTransformation {
 
 /**
  * Same name as the Material Text on purpose. Every file in this package that uses
- * `import androidx.compose.material3.*` now picks this one automatically, so emoji
- * show up in the emoji font everywhere without editing each Text call.
- * Text without emoji goes straight to the normal Material Text.
+ * `import androidx.compose.material3.*` (or has no Text import of its own) now picks this one
+ * automatically, so emoji show up in the emoji font everywhere without editing each Text call.
  */
 @Composable
 fun Text(
@@ -109,27 +109,22 @@ fun Text(
     softWrap: Boolean = true,
     maxLines: Int = Int.MAX_VALUE,
     minLines: Int = 1,
+    onTextLayout: ((TextLayoutResult) -> Unit)? = null,
     style: TextStyle = LocalTextStyle.current
 ) {
-    if (!hasEmoji(text)) {
-        androidx.compose.material3.Text(
-            text = text, modifier = modifier, color = color, fontSize = fontSize,
-            fontStyle = fontStyle, fontWeight = fontWeight, fontFamily = fontFamily,
-            letterSpacing = letterSpacing, textDecoration = textDecoration, textAlign = textAlign,
-            lineHeight = lineHeight, overflow = overflow, softWrap = softWrap,
-            maxLines = maxLines, minLines = minLines, style = style
-        )
-    } else {
-        val ctx = LocalContext.current
-        val annotated = remember(text) { emojiAnnotate(text, EmojiFont.get(ctx)) }
-        androidx.compose.material3.Text(
-            text = annotated, modifier = modifier, color = color, fontSize = fontSize,
-            fontStyle = fontStyle, fontWeight = fontWeight, fontFamily = fontFamily,
-            letterSpacing = letterSpacing, textDecoration = textDecoration, textAlign = textAlign,
-            lineHeight = lineHeight, overflow = overflow, softWrap = softWrap,
-            maxLines = maxLines, minLines = minLines, style = style
-        )
+    val ctx = LocalContext.current
+    val annotated = remember(text) {
+        if (hasEmoji(text)) emojiAnnotate(text, EmojiFont.get(ctx)) else AnnotatedString(text)
     }
+    androidx.compose.material3.Text(
+        text = annotated, modifier = modifier, color = color, fontSize = fontSize,
+        fontStyle = fontStyle, fontWeight = fontWeight, fontFamily = fontFamily,
+        letterSpacing = letterSpacing, textDecoration = textDecoration, textAlign = textAlign,
+        lineHeight = lineHeight, overflow = overflow, softWrap = softWrap,
+        maxLines = maxLines, minLines = minLines,
+        onTextLayout = onTextLayout ?: {},
+        style = style
+    )
 }
 
 /** Same as Text, for places where you want to call it by name. */
