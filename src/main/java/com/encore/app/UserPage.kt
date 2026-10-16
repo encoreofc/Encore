@@ -308,7 +308,7 @@ fun UserPageScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .height(252.dp),
+                        .padding(top = 24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
@@ -345,7 +345,7 @@ fun UserPageScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
