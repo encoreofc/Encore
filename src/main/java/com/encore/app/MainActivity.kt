@@ -7,9 +7,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,13 +43,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.Manifest
@@ -156,8 +164,83 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val AuthYellow = Color(0xFFFFC400)
-private val AuthOnYellow = Color(0xFF111111)
+// champagne gold, same family as the home screen chips and the story "+"
+private val GoldLight = Color(0xFFFFE08C)
+private val Gold = Color(0xFFF2B136)
+private val GoldDeep = Color(0xFFC98400)
+private val AuthOnYellow = Color(0xFF1A1200)
+
+// thin specular light along the top edge, the detail that makes a surface read as glass
+private fun Modifier.topSheen(alpha: Float, inset: Dp): Modifier = drawWithContent {
+    drawContent()
+    val pad = inset.toPx()
+    drawLine(
+        brush = Brush.horizontalGradient(
+            listOf(Color.Transparent, Color.White.copy(alpha = alpha), Color.Transparent)
+        ),
+        start = Offset(pad, 1.dp.toPx()),
+        end = Offset(size.width - pad, 1.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+    )
+}
+
+// champagne-gold glass: gold body, light on the top half, depth at the bottom, rim light, warm glow
+private fun Modifier.goldGlass(
+    shape: Shape,
+    body: Brush = Brush.linearGradient(listOf(GoldLight, Gold, GoldDeep)),
+    glow: Dp = 14.dp,
+    sheenInset: Dp = 14.dp
+): Modifier = this
+    .shadow(
+        glow,
+        shape,
+        ambientColor = GoldDeep.copy(alpha = 0.40f),
+        spotColor = GoldDeep.copy(alpha = 0.55f)
+    )
+    .clip(shape)
+    .background(body)
+    .background(
+        Brush.verticalGradient(
+            0f to Color.White.copy(alpha = 0.45f),
+            0.5f to Color.Transparent,
+            1f to GoldDeep.copy(alpha = 0.30f)
+        )
+    )
+    .border(
+        1.dp,
+        Brush.linearGradient(listOf(Color.White.copy(alpha = 0.9f), Color.White.copy(alpha = 0.1f))),
+        shape
+    )
+    .topSheen(0.7f, sheenInset)
+
+// main action button: gold glass when it can be pressed, plain soft when it can't
+@Composable
+private fun GoldButton(enabled: Boolean, onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+    val shape = RoundedCornerShape(26.dp)
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = shape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.Transparent,
+            contentColor = AuthOnYellow,
+            disabledContainerColor = Ui.soft,
+            disabledContentColor = Ui.muted
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .then(
+                if (enabled) Modifier.goldGlass(
+                    shape,
+                    body = Brush.verticalGradient(listOf(Color(0xFFFFD36E), Gold, Color(0xFFE29B12))),
+                    glow = 12.dp,
+                    sheenInset = 22.dp
+                ) else Modifier
+            ),
+        content = content
+    )
+}
 
 // Google "G" mark as a vector (standard four-colour paths on a 24x24 canvas), no image file needed
 private val GoogleLogo: ImageVector by lazy {
@@ -195,12 +278,12 @@ private val GoogleLogo: ImageVector by lazy {
         .build()
 }
 
-// soft filled fields, a yellow border only while a field is focused
+// soft filled fields, a gold border only while a field is focused
 @Composable
 private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = Ui.soft,
     unfocusedContainerColor = Ui.soft,
-    focusedBorderColor = AuthYellow,
+    focusedBorderColor = Gold,
     unfocusedBorderColor = Color.Transparent,
     focusedLabelColor = Ui.muted,
     unfocusedLabelColor = Ui.muted,
@@ -208,7 +291,7 @@ private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = Ui.ink,
     focusedLeadingIconColor = Ui.ink,
     unfocusedLeadingIconColor = Ui.muted,
-    cursorColor = AuthYellow
+    cursorColor = Gold
 )
 
 @Composable
@@ -283,12 +366,6 @@ private fun AuthScreen(onDone: (String, User) -> Unit) {
 
     val ng = newGoogle
     val fieldShape = RoundedCornerShape(14.dp)
-    val primaryColors = ButtonDefaults.buttonColors(
-        containerColor = AuthYellow,
-        contentColor = AuthOnYellow,
-        disabledContainerColor = Ui.soft,
-        disabledContentColor = Ui.muted
-    )
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -301,8 +378,7 @@ private fun AuthScreen(onDone: (String, User) -> Unit) {
         Box(
             modifier = Modifier
                 .size(56.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(AuthYellow),
+                .goldGlass(RoundedCornerShape(18.dp), sheenInset = 14.dp),
             contentAlignment = Alignment.Center
         ) {
             Text("E", color = AuthOnYellow, fontSize = 28.sp, fontWeight = FontWeight.Bold)
@@ -347,14 +423,9 @@ private fun AuthScreen(onDone: (String, User) -> Unit) {
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
             }
             Spacer(Modifier.height(20.dp))
-            Button(
+            GoldButton(
                 onClick = { completeGoogle(ng.ticket) },
-                enabled = !busy && username.isNotBlank(),
-                shape = RoundedCornerShape(26.dp),
-                colors = primaryColors,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
+                enabled = !busy && username.isNotBlank()
             ) { Text(if (busy) "Please wait" else "Continue", fontSize = 16.sp, fontWeight = FontWeight.Medium) }
             TextButton(
                 onClick = { newGoogle = null; error = null },
@@ -393,14 +464,9 @@ private fun AuthScreen(onDone: (String, User) -> Unit) {
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
             }
             Spacer(Modifier.height(20.dp))
-            Button(
+            GoldButton(
                 onClick = { submit() },
-                enabled = !busy && username.isNotBlank() && password.isNotEmpty(),
-                shape = RoundedCornerShape(26.dp),
-                colors = primaryColors,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
+                enabled = !busy && username.isNotBlank() && password.isNotEmpty()
             ) {
                 Text(
                     if (busy) "Please wait" else if (creating) "Create account" else "Log in",
