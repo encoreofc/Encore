@@ -71,7 +71,7 @@ private fun ConversationHeader(
     soon: SoonState,
     onCall: () -> Unit
 ) {
-    // Telegram chat header: 56dp bar, back button 54dp wide with a 24dp icon, 42dp avatar starting 60dp from the edge,
+    // Chat header: 56dp bar, back button 54dp wide with a 24dp icon, 42dp avatar starting 60dp from the edge,
     // title 18 / subtitle 14 starting 13dp after the avatar, menu buttons 48dp with 24dp icons
     Row(
         modifier = Modifier
@@ -138,7 +138,7 @@ private fun Composer(
         RecordingBar(voice)
         return
     }
-    // Telegram input bar: buttons 44x44dp, field at least 44dp tall with 18 text, 24dp icons
+    // Input bar: buttons 44x44dp, field at least 44dp tall with 18 text, 24dp icons
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -153,6 +153,7 @@ private fun Composer(
             onValueChange = { st.onTextChange(it) },
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = fs(18f), color = Ui.ink),
             cursorBrush = SolidColor(Ui.ink),
+            visualTransformation = rememberEmojiTransformation(),
             interactionSource = src,
             maxLines = 4,
             modifier = Modifier.weight(1f).focusRequester(focus),
@@ -161,8 +162,7 @@ private fun Composer(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(Ui.soft),
+                        .glassSurface(RoundedCornerShape(22.dp)),
                     verticalAlignment = Alignment.Bottom
                 ) {
                     // sticker button inside the field, left side; turns into a keyboard button while the panel is open
@@ -378,7 +378,7 @@ fun ConversationScreen(
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
-                contentPadding = PaddingValues(horizontal = 11.dp, vertical = 8.dp), // Telegram: bubble body sits 11dp from the screen edge
+                contentPadding = PaddingValues(horizontal = 11.dp, vertical = 8.dp), // bubble body sits 11dp from the screen edge
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -391,15 +391,14 @@ fun ConversationScreen(
                                 .padding(vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Telegram ChatActionCell: 14 bold, corner 11, padding 8 x 3, 4dp cell margin
+                            // date chip: 14 bold, corner 11, padding 8 x 3, 4dp cell margin
                             Text(
                                 row,
                                 fontSize = fs(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = Ui.muted,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(11.dp))
-                                    .background(Ui.soft)
+                                    .glassSurface(RoundedCornerShape(11.dp))
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
@@ -412,7 +411,7 @@ fun ConversationScreen(
                                     .padding(vertical = 4.dp, horizontal = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Telegram ChatActionCell: max width = screen - 30dp (list padding 11+11, +4+4 here)
+                                // system chip: max width = screen - 30dp (list padding 11+11, +4+4 here)
                                 Text(
                                     m.body ?: "",
                                     fontSize = fs(14f),
@@ -420,14 +419,13 @@ fun ConversationScreen(
                                     color = Ui.muted,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(11.dp))
-                                        .background(Ui.soft)
+                                        .glassSurface(RoundedCornerShape(11.dp))
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
                             }
                         } else {
                             val mine = m.senderId == me.id
-                            // Telegram groups a run: same sender, within 5 minutes. rev is newest-first.
+                            // groups a run: same sender, within 5 minutes. rev is newest-first.
                             val pinnedBottom = sameRun(row, rev.getOrNull(index - 1))
                             val pinnedTop = sameRun(row, rev.getOrNull(index + 1))
                             val local = m.id.startsWith("local-")
