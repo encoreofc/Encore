@@ -18,7 +18,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Keeps the local database (Room) in step with the server, the way Telegram does:
+ * Keeps the local database (Room) in step with the server, the way modern chat apps do:
  *  - the UI only reads the database
  *  - on start / reconnect only what changed since the last cursor is downloaded (text, edits, deletes, reactions)
  *  - realtime events are written straight into the database, for every chat, not just the open one
