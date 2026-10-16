@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,8 +86,7 @@ private fun ReactionChips(
             Row(
                 modifier = Modifier
                     .height(26.dp)
-                    .clip(shape)
-                    .background(Ui.soft)
+                    .glassSurface(shape)
                     .then(if (chosen) Modifier.border(1.dp, Ui.ink, shape) else Modifier)
                     .clickable { onReact(emoji) }
                     .padding(start = 8.dp, end = if (list.size > 1) 8.dp else 3.dp),
@@ -191,8 +189,7 @@ internal fun Bubble(
                 color = Ui.muted,
                 modifier = Modifier
                     .padding(top = 2.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Ui.soft)
+                    .glassSurface(RoundedCornerShape(10.dp))
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             )
         } else Surface(
