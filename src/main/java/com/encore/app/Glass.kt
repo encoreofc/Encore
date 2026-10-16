@@ -27,3 +27,10 @@ fun Modifier.glassSurface(shape: Shape, strong: Boolean = false): Modifier {
         .background(fill)
         .border(0.8.dp, rim, shape)
 }
+
+/** Slightly see-through container for dialogs and bottom sheets. */
+@Composable
+fun glassDialogColor(): Color = Ui.bg.copy(alpha = 0.94f)
+
+@Composable
+fun glassSheetColor(): Color = Ui.bg.copy(alpha = 0.92f)
