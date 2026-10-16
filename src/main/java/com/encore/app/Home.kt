@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -34,15 +35,15 @@ private fun isGroupChat(c: Conv): Boolean = false
 
 @Composable
 private fun EncoreChip(label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(14.dp)
     Row(
         modifier = Modifier
-            .height(32.dp)
+            .height(28.dp)
             .clip(shape)
             .background(if (selected) BadgeYellow.copy(alpha = 0.18f) else Color.Transparent)
             .border(1.dp, if (selected) BadgeYellow else Ui.line, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 12.5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -53,7 +54,7 @@ private fun EncoreChip(label: String, count: Int?, selected: Boolean, onClick: (
         )
         if (count != null && count > 0) {
             Spacer(Modifier.width(6.dp))
-            Text(count.toString(), fontSize = fs(13f), color = Ui.muted)
+            Text(count.toString(), fontSize = fs(11f), color = Ui.muted)
         }
     }
 }
@@ -128,28 +129,33 @@ fun ChatListScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+                    .height(56.dp)
+                    .padding(start = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StoryAvatar(
-                    me.id,
-                    me.displayName.ifBlank { me.username },
-                    40.dp,
-                    onOpenStory = onStories,
-                    mine = true,
-                    onAdd = onAddStory
-                )
-                Spacer(Modifier.width(12.dp))
+                // your avatar shows up here only while you have a story; otherwise the header is just "Encore" as before
+                if (StoryStore.mine() != null) {
+                    StoryAvatar(
+                        me.id,
+                        me.displayName.ifBlank { me.username },
+                        40.dp,
+                        onOpenStory = onStories,
+                        mine = true
+                    )
+                    Spacer(Modifier.width(12.dp))
+                } else {
+                    Spacer(Modifier.width(0.dp))
+                }
                 Text(
                     "Encore",
-                    fontSize = fs(24f),
+                    fontSize = fs(20f),
                     fontWeight = FontWeight.SemiBold,
                     color = Ui.ink,
                     modifier = Modifier.weight(1f)
                 )
                 Box {
-                    IconButton(onClick = { menu = true }, modifier = Modifier.size(52.dp)) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink, modifier = Modifier.size(28.dp))
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink, modifier = Modifier.size(24.dp))
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
@@ -173,20 +179,27 @@ fun ChatListScreen(
             // your own story sits in the header; other people's stories show as rings on their avatars
 
             // search pill (opens the same Search screen as before)
-            Row(
+            // Telegram FragmentSearchField: 48dp box, 7dp side margin, 3dp inner padding, 20dp radius, 24dp icon, 15 text starting at 48dp
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
                     .height(48.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Ui.soft)
-                    .clickable { onSearch() }
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 7.dp)
+                    .padding(3.dp)
             ) {
-                Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.muted, modifier = Modifier.size(22.dp))
-                Spacer(Modifier.width(12.dp))
-                Text("Search chats and people", color = Ui.muted, fontSize = fs(16f))
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Ui.soft)
+                        .clickable { onSearch() }
+                        .padding(start = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.muted, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Search chats and people", color = Ui.muted, fontSize = fs(15f))
+                }
             }
 
             // filter chips
@@ -194,7 +207,9 @@ fun ChatListScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .height(50.dp)
+                    .padding(horizontal = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 EncoreChip("All", null, filter == 0) { filter = 0 }
@@ -202,8 +217,6 @@ fun ChatListScreen(
                 EncoreChip("Groups", null, filter == 2) { filter = 2 }
                 EncoreChip("Bots", null, false) { onBots() }
             }
-            Spacer(Modifier.height(4.dp))
-
             HorizontalDivider(thickness = 0.5.dp, color = Ui.line)
 
             if (loaded && shown.isEmpty()) {
@@ -215,7 +228,7 @@ fun ChatListScreen(
                 )
             }
 
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp)) {
                 items(shown, key = { it.id }) { c ->
                     val p = c.peer
                     val name = p?.displayName ?: "Unknown"
@@ -232,11 +245,11 @@ fun ChatListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpen(c) }
-                            .padding(start = 14.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+                            .padding(start = 11.dp, end = 15.dp, top = 9.dp, bottom = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StoryAvatar(p?.id ?: c.id, name, 52.dp, onOpenStory = onStories)
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width(13.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
@@ -265,7 +278,7 @@ fun ChatListScreen(
                                     preview,
                                     color = Ui.muted,
                                     fontWeight = FontWeight.Normal,
-                                    fontSize = fs(14f),
+                                    fontSize = fs(15f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -278,8 +291,8 @@ fun ChatListScreen(
                                 Spacer(Modifier.height(6.dp))
                                 Box(
                                     modifier = Modifier
-                                        .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .defaultMinSize(minWidth = 20.67.dp, minHeight = 20.67.dp)
+                                        .clip(RoundedCornerShape(10.33.dp))
                                         .background(if (c.muted) Ui.muted else BadgeYellow)
                                         .padding(horizontal = 6.dp),
                                     contentAlignment = Alignment.Center
@@ -287,7 +300,7 @@ fun ChatListScreen(
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
                                         color = if (c.muted) Ui.onInk else Color(0xFF111111),
-                                        fontSize = fs(12f),
+                                        fontSize = fs(13f),
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -295,7 +308,7 @@ fun ChatListScreen(
                         }
                     }
                     HorizontalDivider(
-                        modifier = Modifier.padding(start = 80.dp),
+                        modifier = Modifier.padding(start = 72.dp),
                         thickness = 0.5.dp,
                         color = Ui.line
                     )
@@ -303,37 +316,53 @@ fun ChatListScreen(
                 }
             }
 
-            HorizontalDivider(color = Ui.line)
+        }
+
+        // Telegram main tabs bar: floating pill 56dp tall, 28dp radius, 8dp margin, max width 328dp, 6dp shadow
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
             Row(
                 modifier = Modifier
+                    .widthIn(max = 328.dp)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 28.dp, vertical = 10.dp),
+                    .height(56.dp)
+                    .shadow(6.dp, RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Ui.bg)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(modifier = Modifier.padding(10.dp)) {
-                    Icon(Icons.Default.Home, contentDescription = "Chats", tint = Ui.ink)
+                Box(
+                    modifier = Modifier.size(48.dp).clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Home, contentDescription = "Chats", tint = Ui.ink, modifier = Modifier.size(24.dp))
                 }
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(22.dp))
                         .background(Ui.ink)
                         .clickable { sheet = true }
-                        .padding(horizontal = 24.dp, vertical = 14.dp),
+                        .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Ui.onInk)
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Ui.onInk, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("New Chat", color = Ui.onInk, fontSize = fs(16f), fontWeight = FontWeight.Medium)
                 }
                 Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onProfile() }
-                        .padding(10.dp)
+                    modifier = Modifier.size(48.dp).clip(CircleShape).clickable { onProfile() },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Person, contentDescription = "Profile", tint = Ui.muted)
+                    Icon(Icons.Default.Person, contentDescription = "Profile", tint = Ui.muted, modifier = Modifier.size(24.dp))
                 }
             }
         }
@@ -347,7 +376,7 @@ fun ChatListScreen(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(end = 16.dp, bottom = 92.dp)
+                .padding(end = 20.dp, bottom = 78.dp)
                 .size(48.dp)
         ) {
             Icon(Icons.Default.Add, contentDescription = "Add story")
