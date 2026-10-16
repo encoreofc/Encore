@@ -33,7 +33,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -68,6 +67,7 @@ private fun StickerBadge?.activeNow(): StickerBadge? =
 object BadgeStore {
     val map = mutableStateMapOf<String, String>()
     val stickers = mutableStateMapOf<String, StickerBadge>()
+    val since = mutableStateMapOf<String, Long>()
     private val asked = HashMap<String, Long>()
     private val pending = LinkedHashSet<String>()
     private val handler = Handler(Looper.getMainLooper())
@@ -101,8 +101,10 @@ object BadgeStore {
             r.onSuccess { j ->
                 val o = j.optJSONObject("badges")
                 val s = j.optJSONObject("stickers")
+                val sn = j.optJSONObject("since")
                 for (id in batch) {
                     if (o != null && o.has(id)) map[id] = o.getString(id) else map.remove(id)
+                    if (sn != null && sn.has(id)) since[id] = sn.optLong(id) else since.remove(id)
                     val sb = s?.optJSONObject(id)
                     if (sb != null) {
                         stickers[id] = StickerBadge(
@@ -236,63 +238,129 @@ fun BadgeOf(userId: String, dim: Dp, shimmer: Boolean = true) {
 }
 
 /* ------------------------------------------------------------------ */
-/* the sparkles behind the badge in the sheet, like Telegram's: many     */
-/* small twinkles scattered all around the badge                        */
+/* the twinkling stars behind the badge in the sheet                    */
 /* ------------------------------------------------------------------ */
 
-// a thin 4 point sparkle in a -0.5..0.5 box, centered on 0,0
-private val Sparkle = Path().apply {
-    val k = 0.09f
-    moveTo(0f, -0.5f); lineTo(k, -k); lineTo(0.5f, 0f); lineTo(k, k)
-    lineTo(0f, 0.5f); lineTo(-k, k); lineTo(-0.5f, 0f); lineTo(-k, -k)
-    close()
+private fun starPath(cx: Float, cy: Float, outer: Float, inner: Float, points: Int): Path {
+    val p = Path()
+    val n = points * 2
+    for (i in 0 until n) {
+        val r = if (i % 2 == 0) outer else inner
+        val a = Math.PI * i / points - Math.PI / 2
+        val x = cx + (r * Math.cos(a)).toFloat()
+        val y = cy + (r * Math.sin(a)).toFloat()
+        if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
+    }
+    p.close()
+    return p
 }
 
-// x, y = place inside the stage (-1..1 from the middle), size in dp, alpha, dot = a tiny round speck
-private class Spark(val x: Float, val y: Float, val size: Float, val alpha: Float, val dot: Boolean)
+private class StarP {
+    var x = 0f
+    var y = 0f
+    var dirX = 0f
+    var dirY = 0f
+    var born = 0L
+    var die = 0L
+    var cls = 0
+    var k = 1f
+}
 
-// the same scatter every time (fixed seed): many small ones, a few bigger
-private val Sparks: List<Spark> = run {
-    val rnd = java.util.Random(11L)
-    List(110) {
-        val a = rnd.nextDouble() * 2.0 * Math.PI
-        val d = Math.sqrt(rnd.nextDouble())
-        val big = rnd.nextInt(8) == 0
-        Spark(
-            (d * Math.cos(a)).toFloat(),
-            (d * Math.sin(a)).toFloat(),
-            if (big) 9f + rnd.nextFloat() * 4f else 3.5f + rnd.nextFloat() * 4f,
-            0.35f + rnd.nextFloat() * 0.65f,
-            !big && rnd.nextInt(5) == 0
-        )
+/**
+ * Stars are born in a ring around the badge, drift outward, fade in with a little
+ * overshoot, live 2-3 s, fade out and are born again. The whole field turns once
+ * in 40-60 s. Sizes 4 / 10 / 8 dp.
+ */
+private class StarField(count: Int) {
+    private val ps = List(count) { StarP() }
+    private val rnd = java.util.Random()
+    private val diameters = floatArrayOf(4f, 10f, 8f)
+    private var last = 0L
+    private var t0 = 0L
+    private var w = -1f
+    private var h = -1f
+
+    private fun spawn(p: StarP, now: Long, hole: Float, first: Boolean) {
+        val maxR = minOf(w, h) / 2f
+        val r = hole + rnd.nextFloat() * (maxR - hole).coerceAtLeast(1f)
+        val a = rnd.nextFloat() * 2f * Math.PI.toFloat()
+        val c = kotlin.math.cos(a)
+        val s = kotlin.math.sin(a)
+        p.x = w / 2f + r * c
+        p.y = h / 2f + r * s
+        p.dirX = c
+        p.dirY = s
+        // the first stars start at different moments so they do not all appear together
+        p.born = now + if (first) rnd.nextInt(300).toLong() else 0L
+        p.die = p.born + 2000L + rnd.nextInt(1000)
+        p.cls = rnd.nextInt(3)
+        p.k = 0.5f + 0.5f * rnd.nextFloat()
+    }
+
+    private fun overshoot(x: Float): Float {
+        val c1 = 1.70158f
+        val c3 = c1 + 1f
+        val t = x - 1f
+        return 1f + c3 * t * t * t + c1 * t * t
+    }
+
+    fun draw(scope: DrawScope, nowMs: Long, color: Color, hole: Float, intensity: Float) {
+        with(scope) {
+            if (intensity <= 0.01f) return@with
+            if (w != size.width || h != size.height) {
+                w = size.width
+                h = size.height
+                t0 = nowMs
+                ps.forEach { spawn(it, nowMs, hole, true) }
+            }
+            val dt = if (last == 0L) 16L else (nowMs - last).coerceIn(4L, 50L)
+            last = nowMs
+            val cx = w / 2f
+            val cy = h / 2f
+            val step = 6.dp.toPx() * dt / 1000f
+            val margin = 15.dp.toPx()
+            val edge = 14.dp.toPx()
+
+            for (p in ps) {
+                if (nowMs < p.born) continue
+
+                val ang = (2.0 * Math.PI * (nowMs - t0) / (40000.0 + p.cls * 10000.0)).toFloat()
+                val ca = kotlin.math.cos(ang)
+                val sa = kotlin.math.sin(ang)
+                val dx = p.x - cx
+                val dy = p.y - cy
+                val px = cx + dx * ca - dy * sa
+                val py = cy + dx * sa + dy * ca
+
+                val inP = ((nowMs - p.born) / 200f).coerceIn(0f, 1f)
+                val out = (1f - (p.die - nowMs) / 300f).coerceIn(0f, 1f)
+                val fade = (minOf(py, h - py) / edge).coerceIn(0f, 1f)
+                val a = 0.7f * p.k * inP * (1f - out) * fade * intensity
+                val r = diameters[p.cls].dp.toPx() / 2f * overshoot(inP)
+                if (a > 0.01f && r > 0f) {
+                    val path = starPath(px, py, r, r * 0.24f, 4)
+                    val c = color.copy(alpha = a)
+                    drawPath(path, c)
+                    drawPath(path, c, style = Stroke(width = r * 0.35f, join = StrokeJoin.Round))
+                }
+
+                p.x += p.dirX * step
+                p.y += p.dirY * step
+                val outside = px < -margin || px > w + margin || py < -margin || py > h + margin
+                if (nowMs > p.die || outside) spawn(p, nowMs, hole, false)
+            }
+        }
     }
 }
 
 @Composable
-private fun StarBackdrop(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val rx = size.width * 0.47f
-        val ry = size.height * 0.5f
-        val hole = 62.dp.toPx() // the badge sits here
-        for (sp in Sparks) {
-            val dx = sp.x * rx
-            val dy = sp.y * ry
-            if (Math.hypot(dx.toDouble(), dy.toDouble()) < hole) continue
-            val sz = sp.size.dp.toPx()
-            val color = SealColor.copy(alpha = sp.alpha)
-            if (sp.dot) {
-                drawCircle(color, radius = sz * 0.2f, center = Offset(cx + dx, cy + dy))
-            } else {
-                translate(cx + dx, cy + dy) {
-                    scale(scaleX = sz, scaleY = sz, pivot = Offset.Zero) {
-                        drawPath(Sparkle, color)
-                    }
-                }
-            }
-        }
+private fun StarParticles(modifier: Modifier, color: Color, hole: Dp, intensity: () -> Float) {
+    val field = remember { StarField(28) }
+    var frame by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) withFrameNanos { frame = it }
     }
+    Canvas(modifier) { field.draw(this, frame / 1_000_000L, color, hole.toPx(), intensity()) }
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,12 +413,12 @@ fun Badge(userId: String?, size: TextUnit = 14.sp, name: String? = null) {
     val dim = with(LocalDensity.current) { size.toDp() } * 1.1f
     Spacer(Modifier.width(4.dp))
     Box(Modifier.clip(CircleShape).clickable { open = true }) { BadgeGlyph(e, dim, true, sticker) }
-    if (open) BadgeSheet(e, sticker, name) { open = false }
+    if (open) BadgeSheet(e, sticker, name, BadgeStore.since[userId]) { open = false }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismiss: () -> Unit) {
+private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, since: Long?, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     // if the phone has animations switched off, show the finished sheet at once
     val calm = remember {
@@ -396,11 +464,8 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
         }
     }
 
-    val who = name ?: "This account"
-    val detail = if (sticker != null) {
-        "$who chose this sticker as their badge. Only Premium accounts can show a badge."
-    } else {
-        "Premium accounts show this badge next to their name in chats, groups and profiles."
+    val sinceText = since?.let {
+        java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.ENGLISH).format(java.util.Date(it))
     }
 
     ModalBottomSheet(
@@ -417,11 +482,9 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
         ) {
             // the stage: stars all around, the badge in the middle
             Box(Modifier.fillMaxWidth().height(236.dp), contentAlignment = Alignment.Center) {
-                StarBackdrop(
-                    Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { alpha = hero.value.coerceIn(0f, 1f) }
-                )
+                if (!calm) {
+                    StarParticles(Modifier.matchParentSize(), SealColor, 84.dp) { hero.value }
+                }
                 Box(
                     Modifier
                         .graphicsLayer {
@@ -446,30 +509,43 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                if (name != null) {
+                    Text(
+                        "ENCORE PREMIUM",
+                        fontSize = 12.sp,
+                        letterSpacing = 1.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Ui.muted,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 Text(
-                    "Encore Premium",
+                    name ?: "Encore Premium",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = (-0.3).sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.semantics { heading() }
                 )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "This account is an Encore Premium member.",
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp,
-                    color = Ui.muted,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    detail,
-                    fontSize = 14.sp,
-                    lineHeight = 21.sp,
-                    color = Ui.muted.copy(alpha = 0.85f),
-                    textAlign = TextAlign.Center
-                )
+                if (sinceText != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Premium since " + sinceText,
+                        fontSize = 15.sp,
+                        color = Ui.muted,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (sticker != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Chose this sticker as their badge.",
+                        fontSize = 14.sp,
+                        color = Ui.muted.copy(alpha = 0.85f),
+                        textAlign = TextAlign.Center
+                    )
+                }
                 val i = info
                 if (sticker != null && i != null) {
                     Spacer(Modifier.height(20.dp))
@@ -511,7 +587,7 @@ private fun BadgeSheet(e: String, sticker: StickerBadge?, name: String?, onDismi
                 }
                 Spacer(Modifier.height(36.dp))
                 Text(
-                    "OK",
+                    "Done",
                     color = Ui.onInk,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Medium,
