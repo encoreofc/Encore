@@ -28,22 +28,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Verified
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.PathParser
 import org.json.JSONObject
 
 data class SessionInfo(val id: String, val device: String?, val createdAt: Long, val current: Boolean)
@@ -150,7 +134,7 @@ private fun Modifier.settingsSheen(alpha: Float): Modifier = drawWithContent {
     )
 }
 
-// ---------- Encore settings icons: official Material icons + real Google "G", gold-glass tile ----------
+// ---------- Encore settings icons: drawn by hand, gold-glass tile ----------
 private enum class SIcon { Theme, Badge, Google, Password, Devices, Notifications, Privacy, About, Delete, Logout }
 
 private val IcLight = Color(0xFFFFE08C)
@@ -176,7 +160,7 @@ private fun SettingsIconTile(icon: SIcon, danger: Boolean = false) {
             .settingsSheen(0.7f),
         contentAlignment = Alignment.Center
     ) {
-        SettingsGlyph(icon, ink)
+        Canvas(Modifier.size(22.dp)) { drawSettingsGlyph(icon, ink) }
     }
 }
 
@@ -189,51 +173,99 @@ private fun IconRow(icon: SIcon, danger: Boolean = false, content: @Composable (
     }
 }
 
-private fun glyphOf(icon: SIcon): ImageVector? = when (icon) {
-    SIcon.Theme -> Icons.Outlined.Palette
-    SIcon.Badge -> Icons.Outlined.Verified
-    SIcon.Google -> null
-    SIcon.Password -> Icons.Outlined.Key
-    SIcon.Devices -> Icons.Outlined.Devices
-    SIcon.Notifications -> Icons.Outlined.Notifications
-    SIcon.Privacy -> Icons.Outlined.Lock
-    SIcon.About -> Icons.Outlined.Info
-    SIcon.Delete -> Icons.Outlined.Delete
-    SIcon.Logout -> Icons.AutoMirrored.Outlined.Logout
-}
-
-// Google's official "G" mark: four brand-colour SVG paths, 48x48 viewBox
-private val GoogleG = listOf(
-    Color(0xFFEA4335) to "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z",
-    Color(0xFF4285F4) to "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z",
-    Color(0xFFFBBC05) to "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z",
-    Color(0xFF34A853) to "M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-)
-
-@Composable
-private fun SettingsGlyph(icon: SIcon, ink: Brush) {
-    val vector = glyphOf(icon)
-    if (vector == null) {
-        val paths = remember { GoogleG.map { (c, d) -> c to PathParser().parsePathString(d).toPath() } }
-        Canvas(Modifier.size(20.dp)) {
-            val k = size.width / 48f
-            withTransform({ scale(k, k, Offset.Zero) }) {
-                paths.forEach { (c, p) -> drawPath(p, c) }
+private fun DrawScope.drawSettingsGlyph(icon: SIcon, brush: Brush) {
+    val s = size.width / 24f
+    val st = Stroke(width = 1.7f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    fun o(x: Float, y: Float) = Offset(x * s, y * s)
+    fun path(build: Path.() -> Unit) = Path().apply(build)
+    when (icon) {
+        SIcon.Theme -> {
+            drawCircle(brush, radius = 8.5f * s, center = o(12f, 12f), style = st)
+            val half = path {
+                moveTo(12f * s, 6f * s)
+                arcTo(Rect(o(6f, 6f), Size(12f * s, 12f * s)), -90f, 180f, false)
+                close()
             }
+            drawPath(half, brush)
         }
-    } else {
-        Icon(
-            imageVector = vector,
-            contentDescription = null,
-            tint = Color.Black,
-            modifier = Modifier
-                .size(24.dp)
-                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-                .drawWithContent {
-                    drawContent()
-                    drawRect(ink, blendMode = BlendMode.SrcIn)
-                }
-        )
+        SIcon.Badge -> {
+            drawPath(path {
+                moveTo(7f * s, 5f * s); lineTo(17f * s, 5f * s); lineTo(21.5f * s, 10f * s)
+                lineTo(12f * s, 20f * s); lineTo(2.5f * s, 10f * s); close()
+            }, brush, style = st)
+            drawLine(brush, o(2.5f, 10f), o(21.5f, 10f), strokeWidth = 1.4f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(7f * s, 5f * s); lineTo(9.5f * s, 10f * s); lineTo(12f * s, 20f * s) }, brush, style = Stroke(1.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(path { moveTo(17f * s, 5f * s); lineTo(14.5f * s, 10f * s); lineTo(12f * s, 20f * s) }, brush, style = Stroke(1.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        SIcon.Google -> {
+            drawCircle(brush, radius = 5.5f * s, center = o(8.5f, 12f), style = st)
+            drawCircle(brush, radius = 5.5f * s, center = o(15.5f, 12f), style = st)
+        }
+        SIcon.Password -> {
+            drawCircle(brush, radius = 4f * s, center = o(7.5f, 12f), style = st)
+            drawCircle(brush, radius = 1.1f * s, center = o(7.5f, 12f))
+            drawLine(brush, o(11.5f, 12f), o(21f, 12f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(17f, 12f), o(17f, 15.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(20.5f, 12f), o(20.5f, 14.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+        }
+        SIcon.Devices -> {
+            drawRoundRect(brush, o(10f, 4f), Size(11f * s, 8f * s), CornerRadius(2f * s), style = st)
+            drawLine(brush, o(15.5f, 12f), o(15.5f, 16f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(12.5f, 16f), o(18.5f, 16f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawRoundRect(brush, o(3f, 10f), Size(6f * s, 10f * s), CornerRadius(1.8f * s), style = st)
+            drawCircle(brush, radius = 0.8f * s, center = o(6f, 17.5f))
+        }
+        SIcon.Notifications -> {
+            drawPath(path {
+                moveTo(6f * s, 16f * s)
+                cubicTo(6f * s, 16f * s, 7f * s, 14.5f * s, 7f * s, 10.5f * s)
+                cubicTo(7f * s, 7.5f * s, 9f * s, 5f * s, 12f * s, 5f * s)
+                cubicTo(15f * s, 5f * s, 17f * s, 7.5f * s, 17f * s, 10.5f * s)
+                cubicTo(17f * s, 14.5f * s, 18f * s, 16f * s, 18f * s, 16f * s)
+                close()
+            }, brush, style = st)
+            drawLine(brush, o(12f, 3f), o(12f, 5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(10f * s, 19f * s); quadraticBezierTo(12f * s, 21.2f * s, 14f * s, 19f * s) }, brush, style = st)
+        }
+        SIcon.Privacy -> {
+            drawPath(path {
+                moveTo(12f * s, 3f * s); lineTo(19f * s, 6f * s); lineTo(19f * s, 12f * s)
+                cubicTo(19f * s, 16.5f * s, 16f * s, 19.5f * s, 12f * s, 21f * s)
+                cubicTo(8f * s, 19.5f * s, 5f * s, 16.5f * s, 5f * s, 12f * s)
+                lineTo(5f * s, 6f * s); close()
+            }, brush, style = st)
+            drawCircle(brush, radius = 1.7f * s, center = o(12f, 10.5f), style = st)
+            drawLine(brush, o(12f, 12.4f), o(12f, 15.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+        }
+        SIcon.About -> {
+            drawArc(brush, startAngle = -40f, sweepAngle = 320f, useCenter = false, topLeft = o(3.5f, 3.5f), size = Size(17f * s, 17f * s), style = st)
+            drawCircle(brush, radius = 1.15f * s, center = o(12f, 8f))
+            drawLine(brush, o(12f, 11f), o(12f, 16.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+        }
+        SIcon.Delete -> {
+            drawLine(brush, o(5f, 7f), o(19f, 7f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(9.5f * s, 7f * s); lineTo(9.5f * s, 4.8f * s); lineTo(14.5f * s, 4.8f * s); lineTo(14.5f * s, 7f * s) }, brush, style = st)
+            drawPath(path {
+                moveTo(7f * s, 7f * s); lineTo(8f * s, 19.5f * s)
+                quadraticBezierTo(8.1f * s, 20.5f * s, 9.2f * s, 20.5f * s)
+                lineTo(14.8f * s, 20.5f * s)
+                quadraticBezierTo(15.9f * s, 20.5f * s, 16f * s, 19.5f * s)
+                lineTo(17f * s, 7f * s)
+            }, brush, style = st)
+            drawLine(brush, o(10.5f, 10.5f), o(10.5f, 17f), strokeWidth = 1.4f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(13.5f, 10.5f), o(13.5f, 17f), strokeWidth = 1.4f * s, cap = StrokeCap.Round)
+        }
+        SIcon.Logout -> {
+            drawPath(path {
+                moveTo(10f * s, 4f * s); lineTo(5.5f * s, 4f * s)
+                quadraticBezierTo(4f * s, 4f * s, 4f * s, 5.5f * s)
+                lineTo(4f * s, 18.5f * s)
+                quadraticBezierTo(4f * s, 20f * s, 5.5f * s, 20f * s)
+                lineTo(10f * s, 20f * s)
+            }, brush, style = st)
+            drawLine(brush, o(9f, 12f), o(20f, 12f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(16f * s, 8f * s); lineTo(20f * s, 12f * s); lineTo(16f * s, 16f * s) }, brush, style = st)
+        }
     }
 }
 
