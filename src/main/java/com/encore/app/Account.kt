@@ -1,6 +1,22 @@
 package com.encore.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -104,6 +120,183 @@ private fun PasswordSetDialog(hasPassword: Boolean, onDismiss: () -> Unit, onDon
     )
 }
 
+// glass card used only on the Settings screen
+private fun Modifier.settingsSheen(alpha: Float): Modifier = drawWithContent {
+    drawContent()
+    val inset = 24.dp.toPx()
+    drawLine(
+        brush = Brush.horizontalGradient(
+            listOf(Color.Transparent, Color.White.copy(alpha = alpha), Color.Transparent)
+        ),
+        start = Offset(inset, 1.dp.toPx()),
+        end = Offset(size.width - inset, 1.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+    )
+}
+
+// ---------- Encore settings icons: drawn by hand, gold-glass tile ----------
+private enum class SIcon { Theme, Badge, Google, Password, Devices, Notifications, Privacy, About, Delete, Logout }
+
+private val IcLight = Color(0xFFFFE08C)
+private val IcGold = Color(0xFFF2B136)
+private val IcDeep = Color(0xFFC98400)
+
+@Composable
+private fun SettingsIconTile(icon: SIcon, danger: Boolean = false) {
+    val shape = RoundedCornerShape(12.dp)
+    val err = MaterialTheme.colorScheme.error
+    val tint = if (danger) Brush.verticalGradient(listOf(err.copy(alpha = 0.30f), err.copy(alpha = 0.08f)))
+    else Brush.verticalGradient(listOf(IcGold.copy(alpha = 0.34f), IcDeep.copy(alpha = 0.10f)))
+    val rim = if (danger) Brush.linearGradient(listOf(err.copy(alpha = 0.85f), err.copy(alpha = 0.25f)))
+    else Brush.linearGradient(listOf(IcLight, IcDeep.copy(alpha = 0.6f)))
+    val ink = if (danger) Brush.linearGradient(listOf(Color(0xFFFFC2BA), err))
+    else Brush.linearGradient(listOf(IcLight, IcGold))
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .glassSurface(shape)
+            .background(tint)
+            .border(1.dp, rim, shape)
+            .settingsSheen(0.7f),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.size(22.dp)) { drawSettingsGlyph(icon, ink) }
+    }
+}
+
+@Composable
+private fun IconRow(icon: SIcon, danger: Boolean = false, content: @Composable () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SettingsIconTile(icon, danger)
+        Spacer(Modifier.width(14.dp))
+        Box(Modifier.weight(1f)) { content() }
+    }
+}
+
+private fun DrawScope.drawSettingsGlyph(icon: SIcon, brush: Brush) {
+    val s = size.width / 24f
+    val st = Stroke(width = 1.7f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    fun o(x: Float, y: Float) = Offset(x * s, y * s)
+    fun path(build: Path.() -> Unit) = Path().apply(build)
+    when (icon) {
+        SIcon.Theme -> {
+            drawCircle(brush, radius = 8.5f * s, center = o(12f, 12f), style = st)
+            val half = path {
+                moveTo(12f * s, 6f * s)
+                arcTo(Rect(o(6f, 6f), Size(12f * s, 12f * s)), -90f, 180f, false)
+                close()
+            }
+            drawPath(half, brush)
+        }
+        SIcon.Badge -> {
+            drawPath(path {
+                moveTo(7f * s, 5f * s); lineTo(17f * s, 5f * s); lineTo(21.5f * s, 10f * s)
+                lineTo(12f * s, 20f * s); lineTo(2.5f * s, 10f * s); close()
+            }, brush, style = st)
+            drawLine(brush, o(2.5f, 10f), o(21.5f, 10f), strokeWidth = 1.4f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(7f * s, 5f * s); lineTo(9.5f * s, 10f * s); lineTo(12f * s, 20f * s) }, brush, style = Stroke(1.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(path { moveTo(17f * s, 5f * s); lineTo(14.5f * s, 10f * s); lineTo(12f * s, 20f * s) }, brush, style = Stroke(1.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        SIcon.Google -> {
+            drawCircle(brush, radius = 5.5f * s, center = o(8.5f, 12f), style = st)
+            drawCircle(brush, radius = 5.5f * s, center = o(15.5f, 12f), style = st)
+        }
+        SIcon.Password -> {
+            drawCircle(brush, radius = 4f * s, center = o(7.5f, 12f), style = st)
+            drawCircle(brush, radius = 1.1f * s, center = o(7.5f, 12f))
+            drawLine(brush, o(11.5f, 12f), o(21f, 12f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(17f, 12f), o(17f, 15.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(20.5f, 12f), o(20.5f, 14.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+        }
+        SIcon.Devices -> {
+            drawRoundRect(brush, o(10f, 4f), Size(11f * s, 8f * s), CornerRadius(2f * s), style = st)
+            drawLine(brush, o(15.5f, 12f), o(15.5f, 16f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(12.5f, 16f), o(18.5f, 16f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawRoundRect(brush, o(3f, 10f), Size(6f * s, 10f * s), CornerRadius(1.8f * s), style = st)
+            drawCircle(brush, radius = 0.8f * s, center = o(6f, 17.5f))
+        }
+        SIcon.Notifications -> {
+            drawPath(path {
+                moveTo(6f * s, 16f * s)
+                cubicTo(6f * s, 16f * s, 7f * s, 14.5f * s, 7f * s, 10.5f * s)
+                cubicTo(7f * s, 7.5f * s, 9f * s, 5f * s, 12f * s, 5f * s)
+                cubicTo(15f * s, 5f * s, 17f * s, 7.5f * s, 17f * s, 10.5f * s)
+                cubicTo(17f * s, 14.5f * s, 18f * s, 16f * s, 18f * s, 16f * s)
+                close()
+            }, brush, style = st)
+            drawLine(brush, o(12f, 3f), o(12f, 5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(10f * s, 19f * s); quadraticBezierTo(12f * s, 21.2f * s, 14f * s, 19f * s) }, brush, style = st)
+        }
+        SIcon.Privacy -> {
+            drawPath(path {
+                moveTo(12f * s, 3f * s); lineTo(19f * s, 6f * s); lineTo(19f * s, 12f * s)
+                cubicTo(19f * s, 16.5f * s, 16f * s, 19.5f * s, 12f * s, 21f * s)
+                cubicTo(8f * s, 19.5f * s, 5f * s, 16.5f * s, 5f * s, 12f * s)
+                lineTo(5f * s, 6f * s); close()
+            }, brush, style = st)
+            drawCircle(brush, radius = 1.7f * s, center = o(12f, 10.5f), style = st)
+            drawLine(brush, o(12f, 12.4f), o(12f, 15.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+        }
+        SIcon.About -> {
+            drawArc(brush, startAngle = -40f, sweepAngle = 320f, useCenter = false, topLeft = o(3.5f, 3.5f), size = Size(17f * s, 17f * s), style = st)
+            drawCircle(brush, radius = 1.15f * s, center = o(12f, 8f))
+            drawLine(brush, o(12f, 11f), o(12f, 16.5f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+        }
+        SIcon.Delete -> {
+            drawLine(brush, o(5f, 7f), o(19f, 7f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(9.5f * s, 7f * s); lineTo(9.5f * s, 4.8f * s); lineTo(14.5f * s, 4.8f * s); lineTo(14.5f * s, 7f * s) }, brush, style = st)
+            drawPath(path {
+                moveTo(7f * s, 7f * s); lineTo(8f * s, 19.5f * s)
+                quadraticBezierTo(8.1f * s, 20.5f * s, 9.2f * s, 20.5f * s)
+                lineTo(14.8f * s, 20.5f * s)
+                quadraticBezierTo(15.9f * s, 20.5f * s, 16f * s, 19.5f * s)
+                lineTo(17f * s, 7f * s)
+            }, brush, style = st)
+            drawLine(brush, o(10.5f, 10.5f), o(10.5f, 17f), strokeWidth = 1.4f * s, cap = StrokeCap.Round)
+            drawLine(brush, o(13.5f, 10.5f), o(13.5f, 17f), strokeWidth = 1.4f * s, cap = StrokeCap.Round)
+        }
+        SIcon.Logout -> {
+            drawPath(path {
+                moveTo(10f * s, 4f * s); lineTo(5.5f * s, 4f * s)
+                quadraticBezierTo(4f * s, 4f * s, 4f * s, 5.5f * s)
+                lineTo(4f * s, 18.5f * s)
+                quadraticBezierTo(4f * s, 20f * s, 5.5f * s, 20f * s)
+                lineTo(10f * s, 20f * s)
+            }, brush, style = st)
+            drawLine(brush, o(9f, 12f), o(20f, 12f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
+            drawPath(path { moveTo(16f * s, 8f * s); lineTo(20f * s, 12f * s); lineTo(16f * s, 16f * s) }, brush, style = st)
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String?, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(22.dp)
+    Column(Modifier.fillMaxWidth().padding(top = 22.dp)) {
+        if (title != null) {
+            Text(
+                title.uppercase(),
+                fontSize = fs(12f),
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.8.sp,
+                color = Ui.muted,
+                modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .glassSurface(shape)
+                .settingsSheen(0.5f)
+                .padding(horizontal = 16.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun GroupDivider() = HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 52.dp))
+
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> Unit) {
     val ctx = LocalContext.current
@@ -181,48 +374,65 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = 16.dp)
             ) {
-                SettingRow("Theme", sub = mode, onClick = { theme = true })
-                HorizontalDivider(color = Ui.line)
-                if (myBadge != null) {
-                    SettingRow("Badge", sub = "Shown next to your name", onClick = { badgePick = true }) {
-                        a?.id?.let { BadgeOf(it, 26.dp, shimmer = false) }
-                    }
-                    HorizontalDivider(color = Ui.line)
-                }
-                SettingRow(
-                    "Google account",
-                    sub = if (a == null) "…" else (a.googleEmail ?: "Not linked. Tap to link"),
-                    onClick = {
-                        if (!busy && a != null) {
-                            if (a.googleEmail != null) unlink = true else linkGoogle()
+                SettingsGroup("Appearance") {
+                    IconRow(SIcon.Theme) { SettingRow("Theme", sub = mode, onClick = { theme = true }) }
+                    if (myBadge != null) {
+                        GroupDivider()
+                        IconRow(SIcon.Badge) {
+                            SettingRow("Badge", sub = "Shown next to your name", onClick = { badgePick = true }) {
+                                a?.id?.let { BadgeOf(it, 26.dp, shimmer = false) }
+                            }
                         }
                     }
-                )
-                HorizontalDivider(color = Ui.line)
-                SettingRow(
-                    if (a != null && !a.hasPassword) "Set a password" else "Change password",
-                    sub = if (a != null && !a.hasPassword) "You signed up with Google" else null,
-                    onClick = { if (a != null) pw = true }
-                )
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Active devices", sub = "See where you are logged in", onClick = onSessions)
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Notifications", sub = "Sounds and alerts", onClick = { soon.show("Notifications") })
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Privacy", sub = "Who can see your info", onClick = { soon.show("Privacy") })
-                HorizontalDivider(color = Ui.line)
-                SettingRow("About", sub = "Encore 0.1")
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Delete account", color = MaterialTheme.colorScheme.error, onClick = { delete = true })
-                HorizontalDivider(color = Ui.line)
-                SettingRow("Log out", color = MaterialTheme.colorScheme.error, onClick = onLogout)
+                }
+                SettingsGroup("Account") {
+                    IconRow(SIcon.Google) {
+                        SettingRow(
+                            "Google account",
+                            sub = if (a == null) "…" else (a.googleEmail ?: "Not linked. Tap to link"),
+                            onClick = {
+                                if (!busy && a != null) {
+                                    if (a.googleEmail != null) unlink = true else linkGoogle()
+                                }
+                            }
+                        )
+                    }
+                    GroupDivider()
+                    IconRow(SIcon.Password) {
+                        SettingRow(
+                            if (a != null && !a.hasPassword) "Set a password" else "Change password",
+                            sub = if (a != null && !a.hasPassword) "You signed up with Google" else null,
+                            onClick = { if (a != null) pw = true }
+                        )
+                    }
+                    GroupDivider()
+                    IconRow(SIcon.Devices) { SettingRow("Active devices", sub = "See where you are logged in", onClick = onSessions) }
+                }
+                SettingsGroup("Preferences") {
+                    IconRow(SIcon.Notifications) { SettingRow("Notifications", sub = "Sounds and alerts", onClick = { soon.show("Notifications") }) }
+                    GroupDivider()
+                    IconRow(SIcon.Privacy) { SettingRow("Privacy", sub = "Who can see your info", onClick = { soon.show("Privacy") }) }
+                }
+                SettingsGroup(null) {
+                    IconRow(SIcon.About) { SettingRow("About", sub = "Encore 0.1") }
+                }
+                Spacer(Modifier.height(16.dp))
+                SettingsGroup(null) {
+                    IconRow(SIcon.Delete, danger = true) {
+                        SettingRow("Delete account", color = MaterialTheme.colorScheme.error, onClick = { delete = true })
+                    }
+                    GroupDivider()
+                    IconRow(SIcon.Logout, danger = true) {
+                        SettingRow("Log out", color = MaterialTheme.colorScheme.error, onClick = onLogout)
+                    }
+                }
                 msg?.let {
                     Spacer(Modifier.height(12.dp))
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(32.dp))
             }
         }
         SoonToast(soon, 40.dp)
