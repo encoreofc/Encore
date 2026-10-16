@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 
 private val BadgeYellow = Color(0xFFFFC400)
 
-// Telegram-style: text size is fixed in dp, so the phone's Font size setting can't shrink it
+// text size is fixed in dp, so the phone font size setting does not change it
 @Composable
 internal fun fs(v: Float) = with(LocalDensity.current) { v.dp.toSp() }
 
@@ -102,6 +102,10 @@ fun ChatListScreen(
         }
     }
 
+    // story rings: who has stories right now
+    LaunchedEffect(Unit) { StoryStore.refresh() }
+    Ticker(60000L, "story-store") { StoryStore.refresh() }
+
     Ticker(30000L, me.id) {
         refresh()
         checkAuth()
@@ -124,9 +128,18 @@ fun ChatListScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+                    .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                StoryAvatar(
+                    me.id,
+                    me.displayName.ifBlank { me.username },
+                    40.dp,
+                    onOpenStory = onStories,
+                    mine = true,
+                    onAdd = onAddStory
+                )
+                Spacer(Modifier.width(12.dp))
                 Text(
                     "Encore",
                     fontSize = fs(24f),
@@ -157,7 +170,7 @@ fun ChatListScreen(
                 }
             }
 
-            StoriesRow(me, onStories, onAddStory)
+            // your own story sits in the header; other people's stories show as rings on their avatars
 
             // search pill (opens the same Search screen as before)
             Row(
@@ -222,7 +235,7 @@ fun ChatListScreen(
                             .padding(start = 14.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(p?.id ?: c.id, name, 52.dp)
+                        StoryAvatar(p?.id ?: c.id, name, 52.dp, onOpenStory = onStories)
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
