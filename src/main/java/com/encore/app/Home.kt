@@ -179,7 +179,7 @@ fun ChatListScreen(
             // your own story sits in the header; other people's stories show as rings on their avatars
 
             // search pill (opens the same Search screen as before)
-            // Telegram FragmentSearchField: 48dp box, 7dp side margin, 3dp inner padding, 20dp radius, 24dp icon, 15 text starting at 48dp
+            // search field: 48dp box, 7dp side margin, 3dp inner padding, 20dp radius, 24dp icon, 15 text starting at 48dp
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -190,8 +190,7 @@ fun ChatListScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Ui.soft)
+                        .glassSurface(RoundedCornerShape(20.dp))
                         .clickable { onSearch() }
                         .padding(start = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -318,7 +317,7 @@ fun ChatListScreen(
 
         }
 
-        // Telegram main tabs bar: floating pill 56dp tall, 28dp radius, 8dp margin, max width 328dp, 6dp shadow
+        // main tabs bar: floating pill 56dp tall, 28dp radius, 8dp margin, max width 328dp, 6dp shadow
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -335,6 +334,7 @@ fun ChatListScreen(
                     .shadow(6.dp, RoundedCornerShape(28.dp))
                     .clip(RoundedCornerShape(28.dp))
                     .background(Ui.bg)
+                    .glassSurface(RoundedCornerShape(28.dp), strong = true)
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -386,7 +386,7 @@ fun ChatListScreen(
     }
 
     if (sheet) {
-        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = Ui.bg) {
+        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = glassSheetColor()) {
             SheetRow(Icons.Default.Email, "New Chat", "Send a message to your contact") {
                 sheet = false
                 startDialog = true
