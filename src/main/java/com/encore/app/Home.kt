@@ -1,6 +1,9 @@
 package com.encore.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -26,6 +29,35 @@ private val BadgeYellow = Color(0xFFFFC400)
 @Composable
 internal fun fs(v: Float) = with(LocalDensity.current) { v.dp.toSp() }
 
+// TODO: fill this in with your real group check (I haven't seen the Conv class)
+private fun isGroupChat(c: Conv): Boolean = false
+
+@Composable
+private fun EncoreChip(label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(shape)
+            .background(if (selected) BadgeYellow.copy(alpha = 0.18f) else Color.Transparent)
+            .border(1.dp, if (selected) BadgeYellow else Ui.line, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            fontSize = fs(14f),
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            color = if (selected) Ui.ink else Ui.muted
+        )
+        if (count != null && count > 0) {
+            Spacer(Modifier.width(6.dp))
+            Text(count.toString(), fontSize = fs(13f), color = Ui.muted)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(
@@ -45,9 +77,16 @@ fun ChatListScreen(
     val chatsState by chatsFlow.collectAsState(initial = null as List<Conv>?)
     val chats: List<Conv> = chatsState ?: emptyList()
     val loaded = chatsState != null
+    val unreadCount = chats.count { it.unread > 0 }
+    val shown: List<Conv> = when (filter) {
+        1 -> chats.filter { it.unread > 0 }
+        2 -> chats.filter { isGroupChat(it) }
+        else -> chats
+    }
     var sheet by remember { mutableStateOf(false) }
     var startDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var filter by remember { mutableStateOf(0) } // 0 All, 1 Unread, 2 Groups
     val soon = remember { SoonState() }
 
     fun refresh() {
@@ -90,17 +129,11 @@ fun ChatListScreen(
             ) {
                 Text(
                     "Encore",
-                    fontSize = fs(26f),
-                    fontWeight = FontWeight.Bold,
+                    fontSize = fs(24f),
+                    fontWeight = FontWeight.SemiBold,
                     color = Ui.ink,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onAddStory, modifier = Modifier.size(52.dp)) {
-                    Icon(Icons.Default.AddCircle, contentDescription = "Add story", tint = Ui.ink, modifier = Modifier.size(28.dp))
-                }
-                IconButton(onClick = onSearch, modifier = Modifier.size(52.dp)) {
-                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.ink, modifier = Modifier.size(28.dp))
-                }
                 Box {
                     IconButton(onClick = { menu = true }, modifier = Modifier.size(52.dp)) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink, modifier = Modifier.size(28.dp))
@@ -126,11 +159,43 @@ fun ChatListScreen(
 
             StoriesRow(me, onStories, onAddStory)
 
+            // search pill (opens the same Search screen as before)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Ui.soft)
+                    .clickable { onSearch() }
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Search, contentDescription = "Search", tint = Ui.muted, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("Search chats and people", color = Ui.muted, fontSize = fs(16f))
+            }
+
+            // filter chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                EncoreChip("All", null, filter == 0) { filter = 0 }
+                EncoreChip("Unread", unreadCount, filter == 1) { filter = 1 }
+                EncoreChip("Groups", null, filter == 2) { filter = 2 }
+                EncoreChip("Bots", null, false) { onBots() }
+            }
+            Spacer(Modifier.height(4.dp))
+
             HorizontalDivider(thickness = 0.5.dp, color = Ui.line)
 
-            if (loaded && chats.isEmpty()) {
+            if (loaded && shown.isEmpty()) {
                 Text(
-                    "No chats yet. Tap New Chat to start one.",
+                    if (chats.isEmpty()) "No chats yet. Tap New Chat to start one." else "Nothing here",
                     color = Ui.muted,
                     fontSize = fs(16f),
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp)
@@ -138,7 +203,7 @@ fun ChatListScreen(
             }
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(chats, key = { it.id }) { c ->
+                items(shown, key = { it.id }) { c ->
                     val p = c.peer
                     val name = p?.displayName ?: "Unknown"
                     val last = c.last
@@ -154,16 +219,16 @@ fun ChatListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpen(c) }
-                            .padding(start = 14.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
+                            .padding(start = 14.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(p?.id ?: c.id, name, 56.dp)
+                        Avatar(p?.id ?: c.id, name, 52.dp)
                         Spacer(Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     name,
-                                    fontSize = fs(17f),
+                                    fontSize = fs(16f),
                                     fontWeight = FontWeight.Medium,
                                     color = Ui.ink,
                                     maxLines = 1,
@@ -187,7 +252,7 @@ fun ChatListScreen(
                                     preview,
                                     color = Ui.muted,
                                     fontWeight = FontWeight.Normal,
-                                    fontSize = fs(16f),
+                                    fontSize = fs(14f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -195,13 +260,13 @@ fun ChatListScreen(
                         }
                         Spacer(Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = fs(13f))
+                            Text(timeLabel(last?.createdAt ?: c.updatedAt), color = Ui.muted, fontSize = fs(12f))
                             if (c.unread > 0) {
                                 Spacer(Modifier.height(6.dp))
                                 Box(
                                     modifier = Modifier
-                                        .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
-                                        .clip(RoundedCornerShape(11.dp))
+                                        .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                                        .clip(RoundedCornerShape(10.dp))
                                         .background(if (c.muted) Ui.muted else BadgeYellow)
                                         .padding(horizontal = 6.dp),
                                     contentAlignment = Alignment.Center
@@ -209,7 +274,7 @@ fun ChatListScreen(
                                     Text(
                                         if (c.unread > 99) "99+" else c.unread.toString(),
                                         color = if (c.muted) Ui.onInk else Color(0xFF111111),
-                                        fontSize = fs(13f),
+                                        fontSize = fs(12f),
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -217,7 +282,7 @@ fun ChatListScreen(
                         }
                     }
                     HorizontalDivider(
-                        modifier = Modifier.padding(start = 84.dp),
+                        modifier = Modifier.padding(start = 80.dp),
                         thickness = 0.5.dp,
                         color = Ui.line
                     )
@@ -258,6 +323,21 @@ fun ChatListScreen(
                     Icon(Icons.Default.Person, contentDescription = "Profile", tint = Ui.muted)
                 }
             }
+        }
+
+        // story "+" (moved here from the header), floats above the New Chat bar
+        FloatingActionButton(
+            onClick = onAddStory,
+            containerColor = BadgeYellow,
+            contentColor = Color(0xFF111111),
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 16.dp, bottom = 92.dp)
+                .size(48.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Add story")
         }
 
         SoonToast(soon, 84.dp)
