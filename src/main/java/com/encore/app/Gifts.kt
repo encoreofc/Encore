@@ -467,7 +467,7 @@ private fun GiftTile(g: GiftItem, fill: Color, modifier: Modifier, onClick: () -
  * (2.667dp blur, 0.85dp down). The values for dark mode are the ones Telegram uses for dark.
  */
 @Composable
-private fun GlassSurface(radius: Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun GlassSurface(radius: Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val shape = RoundedCornerShape(radius)
     val dark = Ui.bg.luminance() < 0.5f
     val edgeTop = Color(if (dark) 0x06FFFFFF else 0x11000000)
@@ -482,6 +482,18 @@ private fun GlassSurface(radius: Dp, modifier: Modifier = Modifier, content: @Co
     ) { content() }
 }
 
+/** The words "Gifts" (15sp bold) with a few of the gift pictures after them; used as the first tab of the profile strip. */
+@Composable
+fun GiftsTabLabel(gifts: List<GiftItem>?, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Gifts", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = color)
+        gifts.orEmpty().distinctBy { it.name }.take(3).forEach { g ->
+            Spacer(Modifier.width(4.dp))
+            GiftArt(g, 18.dp, loop = false)
+        }
+    }
+}
+
 /**
  * The Gifts block at the bottom of a profile, like Telegram's tab: a frosted tab pill (36dp tall inside a
  * 50dp strip, corners 18dp, tab text 15sp bold, tab padding 16dp) reading "Gifts" with a few of the gift pictures,
@@ -489,7 +501,7 @@ private fun GlassSurface(radius: Dp, modifier: Modifier = Modifier, content: @Co
  * taken back so the grid reaches the same edges. The last row leaves room for the floating send button.
  */
 @Composable
-fun GiftsSection(gifts: List<GiftItem>?, onOpen: (GiftItem) -> Unit) {
+fun GiftsSection(gifts: List<GiftItem>?, onOpen: (GiftItem) -> Unit, showHeader: Boolean = true) {
     // the profile page pads its sides by 16dp; the grid wants 9dp
     val bleed = 7.dp
     Column(
@@ -502,30 +514,28 @@ fun GiftsSection(gifts: List<GiftItem>?, onOpen: (GiftItem) -> Unit) {
         },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // the strip is 50dp tall; the glass pill inside it is about 36dp (strip padding 7dp), corners 18dp
-        Box(Modifier.height(50.dp), contentAlignment = Alignment.Center) {
-            GlassSurface(18.dp) {
-                // the selected tab: 28dp tall (4dp in from the pill edge), corners 14dp, the text colour at 15%
-                Box(Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Ui.ink.copy(alpha = 0.15f))
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // tab text is 15sp bold; the gift pictures follow it like emoji
-                        Text("Gifts", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ui.ink)
-                        gifts.orEmpty().distinctBy { it.name }.take(3).forEach { g ->
-                            Spacer(Modifier.width(4.dp))
-                            GiftArt(g, 18.dp, loop = false)
+        if (showHeader) {
+            // the strip is 50dp tall; the glass pill inside it is about 36dp (strip padding 7dp), corners 18dp
+            Box(Modifier.height(50.dp), contentAlignment = Alignment.Center) {
+                GlassSurface(18.dp) {
+                    // the selected tab: 28dp tall (4dp in from the pill edge), corners 14dp, the text colour at 15%
+                    Box(Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Ui.ink.copy(alpha = 0.15f))
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // tab text is 15sp bold; the gift pictures follow it like emoji
+                            GiftsTabLabel(gifts, Ui.ink)
                         }
                     }
                 }
             }
+            Spacer(Modifier.height(4.dp))
         }
-        Spacer(Modifier.height(4.dp))
         when {
             gifts == null -> {
                 // keeps the room of two rows while loading so the page does not jump
