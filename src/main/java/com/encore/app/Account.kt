@@ -135,7 +135,7 @@ private fun Modifier.settingsSheen(alpha: Float): Modifier = drawWithContent {
 }
 
 // ---------- Encore settings icons: drawn by hand, gold-glass tile ----------
-private enum class SIcon { Theme, Badge, Google, Password, Devices, Notifications, Privacy, About, Delete, Logout }
+private enum class SIcon { Theme, Badge, Google, Password, Devices, Notifications, Privacy, About, Delete, Logout, Gems }
 
 private val IcLight = Color(0xFFFFE08C)
 private val IcGold = Color(0xFFF2B136)
@@ -266,6 +266,15 @@ private fun DrawScope.drawSettingsGlyph(icon: SIcon, brush: Brush) {
             drawLine(brush, o(9f, 12f), o(20f, 12f), strokeWidth = 1.7f * s, cap = StrokeCap.Round)
             drawPath(path { moveTo(16f * s, 8f * s); lineTo(20f * s, 12f * s); lineTo(16f * s, 16f * s) }, brush, style = st)
         }
+        SIcon.Gems -> {
+            drawPath(path {
+                moveTo(12f * s, 3f * s); lineTo(19.8f * s, 7.5f * s); lineTo(19.8f * s, 16.5f * s)
+                lineTo(12f * s, 21f * s); lineTo(4.2f * s, 16.5f * s); lineTo(4.2f * s, 7.5f * s); close()
+            }, brush, style = st)
+            val facet = Stroke(1.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            drawPath(path { moveTo(4.2f * s, 7.5f * s); lineTo(12f * s, 12f * s); lineTo(19.8f * s, 7.5f * s) }, brush, style = facet)
+            drawLine(brush, o(12f, 12f), o(12f, 21f), strokeWidth = 1.2f * s, cap = StrokeCap.Round)
+        }
     }
 }
 
@@ -305,6 +314,7 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
     var pw by remember { mutableStateOf(false) }
     var unlink by remember { mutableStateOf(false) }
     var badgePick by remember { mutableStateOf(false) }
+    var gemsOpen by remember { mutableStateOf(false) }
     var acct by remember { mutableStateOf<Acct?>(null) }
     var msg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -324,6 +334,7 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
     }
 
     LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { GemsStore.refresh() }
 
     fun linkGoogle() {
         busy = true
@@ -387,6 +398,20 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
                         }
                     }
                 }
+                SettingsGroup(null) {
+                    IconRow(SIcon.Gems) {
+                        SettingRow("Gems", sub = "Balance and history", onClick = { gemsOpen = true }) {
+                            val b = GemsStore.balance
+                            if (b != null) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    GemGlyph(16.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(formatGems(b), color = Ui.muted, fontSize = 15.sp)
+                                }
+                            }
+                        }
+                    }
+                }
                 SettingsGroup("Account") {
                     IconRow(SIcon.Google) {
                         SettingRow(
@@ -436,6 +461,7 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
             }
         }
         SoonToast(soon, 40.dp)
+        if (gemsOpen) GemsScreen(onBack = { gemsOpen = false; GemsStore.refresh() })
     }
 
     if (theme) ThemeDialog(onDismiss = { theme = false })
