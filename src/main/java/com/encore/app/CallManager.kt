@@ -117,6 +117,11 @@ object CallManager {
         startRing()
     }
 
+    /** Starts or refreshes the foreground service that keeps the call alive in the background. */
+    private fun syncService() {
+        appCtx?.let { CallService.sync(it) }
+    }
+
     private fun ui(block: () -> Unit) {
         main.post { block() }
     }
@@ -147,6 +152,7 @@ object CallManager {
         seconds = 0
         phase = CallPhase.Calling
         startRingback()
+        syncService()
         Thread {
             try {
                 val r = Api.call("POST", "/v1/calls", JSONObject().put("conversation_id", cid))
@@ -233,6 +239,7 @@ object CallManager {
         val g = gen
         phase = CallPhase.Connecting
         stopRing()
+        syncService()
         Thread {
             try {
                 val r = Api.call("POST", "/v1/calls/$id/accept")
@@ -302,6 +309,7 @@ object CallManager {
         stopRingback()
         appCtx?.let { CallNotification.cancel(it) }
         releaseMedia()
+        appCtx?.let { CallService.stop(it) }
         phase = CallPhase.Idle
         callId = null
         acceptCallId = null
@@ -541,6 +549,7 @@ object CallManager {
                                     phase = CallPhase.Active
                                     startTimer(g)
                                     startLevels(g)
+                                    syncService()
                                 }
                             }
                             PeerConnection.IceConnectionState.FAILED -> ui {
