@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -135,6 +136,24 @@ private fun Pill(
     }
 }
 
+/** One action in the row under the name: icon on top, label under it, 74dp tall. */
+@Composable
+private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
+    Column(
+        modifier = modifier
+            .height(74.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Ui.soft)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) { icon() }
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = Ui.ink, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+    }
+}
+
 @Composable
 private fun PrefRow(
     label: String,
@@ -225,7 +244,9 @@ fun UserPageScreen(
     onStories: (List<StoryGroup>, Int, Int) -> Unit,
     onSearch: () -> Unit,
     onMedia: () -> Unit,
-    // opens the send-gift flow for this person; wire it when that screen exists
+    // true when this person is in your contacts: then the gift button moves from the action row into the top-right menu
+    isContact: Boolean = false,
+    // called after a gift was sent from this page
     onSendGift: () -> Unit = {}
 ) {
     val peer = conv.peer
@@ -249,6 +270,8 @@ fun UserPageScreen(
     var gifts by remember(conv.id) { mutableStateOf<List<GiftItem>?>(null) }
     var giftsExpanded by remember(conv.id) { mutableStateOf(false) }
     var openGift by remember { mutableStateOf<GiftItem?>(null) }
+    var shopOpen by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
 
     // never leave the page waiting: after a short moment show whatever is known
@@ -403,30 +426,22 @@ fun UserPageScreen(
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                // all three actions share one style so they read as a set
+                // the actions share one style so they read as a set; the gift button sits here unless this is a contact
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Pill("Audio", false, { soon.show("Calls") }, Modifier.weight(1f)) {
-                        Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(20.dp))
+                    ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
+                        Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
                     }
-                    Pill("Video", false, { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.ink) }
-                    Pill("Search", false, onSearch, Modifier.weight(1f)) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(20.dp))
+                    ActionTile("Video", { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.ink) }
+                    ActionTile("Search", onSearch, Modifier.weight(1f)) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                    }
+                    if (peer != null && !blocked && !isContact) {
+                        ActionTile("Gift", { shopOpen = true }, Modifier.weight(1f)) { GiftGlyph(Ui.ink, 26.dp) }
                     }
                 }
-
-                Spacer(Modifier.height(28.dp))
-                // gifts sit right under the actions so they are easy to see
-                GiftsSection(
-                    gifts = gifts,
-                    peerName = giftName,
-                    expanded = giftsExpanded,
-                    onToggleExpanded = { giftsExpanded = !giftsExpanded },
-                    onOpen = { openGift = it },
-                    onSend = onSendGift
-                )
 
                 Spacer(Modifier.height(28.dp))
                 Row(
@@ -527,7 +542,17 @@ fun UserPageScreen(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(28.dp))
+                GiftsSection(
+                    gifts = gifts,
+                    peerName = giftName,
+                    expanded = giftsExpanded,
+                    onToggleExpanded = { giftsExpanded = !giftsExpanded },
+                    onOpen = { openGift = it },
+                    onSend = { shopOpen = true }
+                )
+
+                Spacer(Modifier.height(28.dp))
                 // risky actions get their own card, with red icons
                 Column(
                     modifier = Modifier
@@ -572,21 +597,42 @@ fun UserPageScreen(
                 Spacer(Modifier.height(24.dp))
                 }
             }
-            // always one tap away; hidden for someone you have blocked
-            if (peer != null && !blocked) {
-                SendGiftBar(giftName.ifBlank { "them" }, onSendGift)
-            }
         }
-        // the close button floats over the photo, top right
-        IconButton(
-            onClick = onBack,
+        // top right, over the photo: the menu (only for contacts, it holds "Send a gift") and the close button
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(8.dp)
-                .background(Color(0x66000000), CircleShape)
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+            if (isContact && peer != null && !blocked) {
+                Box {
+                    IconButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.background(Color(0x66000000), CircleShape)
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = Ui.bg) {
+                        DropdownMenuItem(
+                            text = { Text("Send a gift") },
+                            leadingIcon = { GiftGlyph(Ui.ink, 22.dp) },
+                            onClick = {
+                                menuOpen = false
+                                shopOpen = true
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.background(Color(0x66000000), CircleShape)
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+            }
         }
         SoonToast(soon, 40.dp)
         val shownUrl = photoUrl
@@ -602,6 +648,18 @@ fun UserPageScreen(
             onDismiss = { openGift = null },
             onSendOne = {
                 openGift = null
+                shopOpen = true
+            }
+        )
+    }
+
+    if (shopOpen && peer != null) {
+        GiftShopSheet(
+            userId = peer.id,
+            peerName = giftName,
+            onDismiss = { shopOpen = false },
+            onSent = {
+                runIo({ GiftsApi.received(peer.id) }) { r -> r.onSuccess { gifts = it } }
                 onSendGift()
             }
         )
