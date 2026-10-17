@@ -121,21 +121,24 @@ private fun BlockGlyph(color: Color) {
 /** The bell; when muted a slash is drawn across it with a small gap in the tile colour. */
 @Composable
 private fun MuteGlyph(muted: Boolean) {
+    // read the colours here, in composable scope; the Canvas lambda is a DrawScope, not composable
+    val ink = Ui.ink
+    val soft = Ui.soft
     Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-        Icon(Icons.Default.Notifications, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+        Icon(Icons.Default.Notifications, contentDescription = null, tint = ink, modifier = Modifier.size(24.dp))
         if (muted) {
             Canvas(Modifier.size(24.dp)) {
                 val w = size.width
                 val sw = w * 0.09f
                 drawLine(
-                    Ui.soft,
+                    soft,
                     start = Offset(w * 0.2f, w * 0.14f),
                     end = Offset(w * 0.82f, w * 0.86f),
                     strokeWidth = sw * 2.6f,
                     cap = StrokeCap.Round
                 )
                 drawLine(
-                    Ui.ink,
+                    ink,
                     start = Offset(w * 0.2f, w * 0.14f),
                     end = Offset(w * 0.82f, w * 0.86f),
                     strokeWidth = sw,
