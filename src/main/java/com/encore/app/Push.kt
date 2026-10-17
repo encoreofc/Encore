@@ -45,17 +45,40 @@ class PushService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val d = message.data
-        when (d["type"]) {
+        when (d[\"type\"]) {
             "message" -> {
                 // pull the new message into the local database right away, even if the app is closed
                 Sync.kick()
                 showMessage(d["c"] ?: return, d["title"] ?: "Encore", d["body"] ?: "New message")
             }
-            "call" -> CallNotification.show(applicationContext, d)
+            "call" -> {
+                // ring first, check second: a slow network must never delay the ring
+                CallNotification.show(applicationContext, d)
+                verifyStillRinging(d["call_id"])
+            }
             "missed_call" -> {
                 CallNotification.cancel(applicationContext)
                 showMessage(d["c"] ?: return, "Missed call", "You missed a call")
             }
+        }
+    }
+
+    /**
+     * Pushes can arrive late. If the call already ended, was answered on another device or was
+     * declined, take the ringing notification down again instead of ringing for a dead call.
+     * If the check cannot run (offline), keep ringing.
+     */
+    private fun verifyStillRinging(id: String?) {
+        if (id == null) return
+        Session.load(applicationContext)
+        if (Session.token == null) {
+            CallNotification.cancel(applicationContext)
+            return
+        }
+        try {
+            val st = Api.call("GET", "/v1/calls/$id").getJSONObject("call").getString("state")
+            if (st != "ringing") CallNotification.cancel(applicationContext)
+        } catch (e: Exception) {
         }
     }
 
