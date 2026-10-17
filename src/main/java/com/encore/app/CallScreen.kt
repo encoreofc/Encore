@@ -170,6 +170,7 @@ private fun voiceLevel(on: Boolean, raw: Float): Float =
 private const val FieldW = 48
 private const val FieldH = 80
 private const val PointCount = 4
+private const val CallAiry = 0.05f
 private const val BaseR = 0x12
 private const val BaseG = 0x14
 private const val BaseB = 0x1A
@@ -232,7 +233,7 @@ private fun DrawScope.drawCallGlow(
         y = lerpF(y, 0.5f, 0.36f * e)
         f.ptX[k] = x
         f.ptY[k] = y
-        f.mul[k] = 1f + 3.6f * e
+        f.mul[k] = 1f + 1.7f * e
         f.soft[k] = 0.05f + 0.06f * e
         val c = paletteColor(pos + if (theirs) PeerPaletteShift * spread else 0f, k)
         f.cr[k] = c.red * 255f
@@ -267,9 +268,13 @@ private fun DrawScope.drawCallGlow(
             b = (b / sw) * lift
             // blending several colours dulls them; give back a little richness so the mix is never muddy
             val luma = 0.299f * r + 0.587f * g + 0.114f * b
-            r = luma + (r - luma) * 1.08f
-            g = luma + (g - luma) * 1.08f
-            b = luma + (b - luma) * 1.08f
+            r = luma + (r - luma) * 0.94f
+            g = luma + (g - luma) * 0.94f
+            b = luma + (b - luma) * 0.94f
+            // an airy lift so the colour reads light and natural, not heavy
+            r += (255f - r) * CallAiry
+            g += (255f - g) * CallAiry
+            b += (255f - b) * CallAiry
             val rr = (BaseR + (r - BaseR) * cover).coerceIn(0f, 255f).toInt()
             val gg = (BaseG + (g - BaseG) * cover).coerceIn(0f, 255f).toInt()
             val bb = (BaseB + (b - BaseB) * cover).coerceIn(0f, 255f).toInt()
