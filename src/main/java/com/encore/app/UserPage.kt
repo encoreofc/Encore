@@ -262,7 +262,7 @@ private fun fileSizeText(b: Long): String = when {
     else -> "$b B"
 }
 
-private fun clock(ms: Long): String {
+private fun voiceClock(ms: Long): String {
     val s = (ms / 1000).toInt()
     return String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
 }
@@ -568,7 +568,7 @@ private fun SharedVoiceList(cid: String, items: List<MsgItem>, meId: String, pee
                         modifier = Modifier.padding(start = 72.dp, end = 8.dp, top = 9.dp)
                     )
                     Text(
-                        "$who \u2022 ${clock(shownMs)}",
+                        "$who \u2022 ${voiceClock(shownMs)}",
                         color = Ui.muted,
                         fontSize = 13.sp,
                         lineHeight = 17.sp,
