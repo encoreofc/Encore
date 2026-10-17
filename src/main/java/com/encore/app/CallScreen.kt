@@ -399,6 +399,8 @@ fun rememberMicGate(): (() -> Unit) -> Unit {
 
 @Composable
 fun CallHost() {
+    val appCtx = LocalContext.current.applicationContext
+    LaunchedEffect(Unit) { CallChatNet.install(appCtx) }
     OnRealtime { CallManager.onEvent(it) }
     if (CallManager.phase != CallPhase.Idle) {
         CallScreen()
