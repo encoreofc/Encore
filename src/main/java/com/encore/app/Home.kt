@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -123,6 +124,29 @@ fun ChatListScreen(
     var startDialog by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val soon = remember { SoonState() }
+    // contacts: the full list opens over the chat list, "New Contact" opens the add sheet
+    var contactsOpen by remember { mutableStateOf(false) }
+    var addContact by remember { mutableStateOf(false) }
+    val appCtx = LocalContext.current.applicationContext
+
+    // a contact opens its chat; with no chat yet, the server makes sure it exists and then it opens
+    fun openContact(id: String) {
+        contactsOpen = false
+        val conv = chats.firstOrNull { it.peer?.id == id }
+        if (conv != null) {
+            onOpen(conv)
+        } else {
+            runIo({
+                val cid = ContactsApi.chatId(id)
+                Api.conversations().firstOrNull { it.id == cid }
+            }) { r ->
+                r.onSuccess { found -> if (found != null) onOpen(found) }
+                    .onFailure {
+                        android.widget.Toast.makeText(appCtx, it.message ?: "Couldn't open the chat", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+            }
+        }
+    }
 
     fun refresh() {
         Sync.kick()
@@ -141,14 +165,23 @@ fun ChatListScreen(
     LaunchedEffect(Unit) { StoryStore.refresh() }
     Ticker(60000L, "story-store") { StoryStore.refresh() }
 
+    // contacts: what was saved on the phone shows at once, then the server list replaces it
+    LaunchedEffect(me.id) {
+        ContactsStore.attach(appCtx)
+        ContactsStore.refresh()
+    }
+
     Ticker(30000L, me.id) {
         refresh()
         checkAuth()
+        ContactsStore.refresh()
     }
 
     OnRealtime { e ->
         when (e.optString("type")) {
             "message", "read", "hello" -> refresh()
+            // the contact list changed on another device of yours
+            "contacts" -> ContactsStore.refresh()
             "badge" -> BadgeStore.apply(e)
             else -> {}
         }
@@ -192,6 +225,13 @@ fun ChatListScreen(
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Ui.ink, modifier = Modifier.size(24.dp))
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Contacts", fontSize = fs(16f)) },
+                            onClick = {
+                                menu = false
+                                contactsOpen = true
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Settings", fontSize = fs(16f)) },
                             onClick = {
@@ -264,7 +304,8 @@ fun ChatListScreen(
             LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp)) {
                 items(shown, key = { it.id }) { c ->
                     val p = c.peer
-                    val name = p?.displayName ?: "Unknown"
+                    // a contact shows under the name you gave them
+                    val name = ContactsStore.nameFor(p?.id, p?.displayName ?: "Unknown")
                     val last = c.last
                     val mineLast = last != null && !last.deleted && last.kind != "system" && last.senderId == me.id
                     val preview = when {
@@ -438,6 +479,14 @@ fun ChatListScreen(
         }
 
         SoonToast(soon, 84.dp)
+
+        if (contactsOpen) {
+            ContactsScreen(
+                onBack = { contactsOpen = false },
+                onOpen = { openContact(it.id) },
+                onAdd = { addContact = true }
+            )
+        }
     }
 
     if (sheet) {
@@ -456,7 +505,7 @@ fun ChatListScreen(
             }
             SheetRow(Icons.Default.AccountCircle, "New Contact", "Add a contact to be able to send messages") {
                 sheet = false
-                soon.show("New contact")
+                addContact = true
             }
             SheetRow(Icons.Default.Star, "New Community", "Join the community around you") {
                 sheet = false
@@ -472,6 +521,10 @@ fun ChatListScreen(
             ) { Text("Cancel") }
             Spacer(Modifier.height(16.dp))
         }
+    }
+
+    if (addContact) {
+        AddContactSheet(onDismiss = { addContact = false })
     }
 
     if (startDialog) {
