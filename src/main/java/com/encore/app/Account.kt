@@ -315,6 +315,7 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
     var unlink by remember { mutableStateOf(false) }
     var badgePick by remember { mutableStateOf(false) }
     var gemsOpen by remember { mutableStateOf(false) }
+    var giftShop by remember { mutableStateOf(false) }
     var acct by remember { mutableStateOf<Acct?>(null) }
     var msg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -461,7 +462,8 @@ fun SettingsScreen(onBack: () -> Unit, onSessions: () -> Unit, onLogout: () -> U
             }
         }
         SoonToast(soon, 40.dp)
-        if (gemsOpen) GemsScreen(onBack = { gemsOpen = false; GemsStore.refresh() })
+        if (gemsOpen) GemsScreen(onBack = { gemsOpen = false; GemsStore.refresh() }, onSendGift = { giftShop = true })
+        if (giftShop) GiftShopSheet(null, "", onDismiss = { giftShop = false; GemsStore.refresh() })
     }
 
     if (theme) ThemeDialog(onDismiss = { theme = false })
