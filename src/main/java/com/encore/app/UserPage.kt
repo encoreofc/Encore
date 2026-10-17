@@ -1,24 +1,21 @@
 package com.encore.app
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
@@ -28,7 +25,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -42,26 +38,41 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
-private val UserPageYellow = Color(0xFFFFC400)
-private val UserPageOnYellow = Color(0xFF111111)
+// ---------------------------------------------------------------------------
+// Telegram's profile header, measured from ProfileActivity / ProfileActionsView
+// (screen 360dp wide in the reference screenshot):
+//   avatar 96dp, top = status bar + 56 (action bar) - 21 = status bar + 35dp
+//   name 17.5dp * 1.12 = 19.6sp bold, centre 28dp under the avatar
+//   action tiles: 54dp tall, 14dp from the screen edge, 7dp apart, corners 16dp,
+//                 icon 24dp (7dp from the top), label 11sp bold, tile top 85dp under the avatar
+//   info card: 12dp from the edge, corners 16dp, rows padded 18 / 10dp,
+//              value 16sp, label 13sp, 5dp between them
+//   gifts grid: tiles 12dp from the edge (GiftsSection adds 12.5dp - 7dp, so 6.5dp is given to it)
+// ---------------------------------------------------------------------------
+
+private val StoryGold = listOf(
+    Color(0xFFFFE27A),
+    Color(0xFFFFC400),
+    Color(0xFFB8860B),
+    Color(0xFFFFC400),
+    Color(0xFFFFE27A)
+)
 
 @Composable
 private fun GalleryGlyph(color: Color) {
     Canvas(Modifier.size(24.dp)) {
         val w = size.width
         val sw = w * 0.08f
-        // outer rounded frame
         drawRoundRect(
             color,
             topLeft = Offset(w * 0.1f, w * 0.14f),
@@ -69,9 +80,7 @@ private fun GalleryGlyph(color: Color) {
             cornerRadius = CornerRadius(w * 0.12f),
             style = Stroke(width = sw)
         )
-        // sun
         drawCircle(color, radius = w * 0.07f, center = Offset(w * 0.34f, w * 0.36f))
-        // mountains
         val mountain = Path().apply {
             moveTo(w * 0.12f, w * 0.72f)
             lineTo(w * 0.36f, w * 0.54f)
@@ -87,7 +96,7 @@ private fun GalleryGlyph(color: Color) {
     }
 }
 
-// circle with a slash, drawn by hand like the gallery icon (no extra icon library needed)
+// circle with a slash, drawn by hand (no extra icon library needed)
 @Composable
 private fun BlockGlyph(color: Color) {
     Canvas(Modifier.size(24.dp)) {
@@ -109,139 +118,147 @@ private fun BlockGlyph(color: Color) {
     }
 }
 
+/** The bell; when muted a slash is drawn across it with a small gap in the tile colour. */
 @Composable
-private fun Pill(
-    label: String,
-    dark: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: @Composable () -> Unit
-) {
-    Row(
+private fun MuteGlyph(muted: Boolean) {
+    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+        Icon(Icons.Default.Notifications, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+        if (muted) {
+            Canvas(Modifier.size(24.dp)) {
+                val w = size.width
+                val sw = w * 0.09f
+                drawLine(
+                    Ui.soft,
+                    start = Offset(w * 0.2f, w * 0.14f),
+                    end = Offset(w * 0.82f, w * 0.86f),
+                    strokeWidth = sw * 2.6f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    Ui.ink,
+                    start = Offset(w * 0.2f, w * 0.14f),
+                    end = Offset(w * 0.82f, w * 0.86f),
+                    strokeWidth = sw,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+    }
+}
+
+/** One action under the name: 54dp tall, icon 24dp starting 6.9dp from the top, label 11sp bold (top at 33.6dp). */
+@Composable
+private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
+    Column(
         modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(if (dark) Ui.ink else Ui.soft)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+            .height(54.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Ui.soft)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        icon()
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.height(6.9.dp))
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
+        Spacer(Modifier.height(2.7.dp))
         Text(
             label,
-            color = if (dark) Ui.onInk else Ui.ink,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
+            color = Ui.ink,
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false
         )
     }
 }
 
-/** One action in the row under the name: icon on top, label under it, 74dp tall. */
+/** A row of the info card: the value on top (16sp), the small grey label under it (13sp). */
 @Composable
-private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
+private fun InfoRow(value: String, label: String, valueLineHeight: TextUnit) {
     Column(
-        modifier = modifier
-            .height(74.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Ui.soft)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
-        // measured from the reference row: icon 24dp starting 21.7dp from the top, label 11sp medium 4dp under it
-        Spacer(Modifier.height(21.7.dp))
-        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = Ui.ink, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
-    }
-}
-
-@Composable
-private fun PrefRow(
-    label: String,
-    onClick: () -> Unit,
-    color: Color = Ui.ink,
-    chevron: Boolean = true,
-    icon: @Composable () -> Unit
-) {
-    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 14.dp, horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 10.dp)
     ) {
-        icon()
-        Spacer(Modifier.width(14.dp))
-        Text(label, color = color, fontSize = 16.sp, modifier = Modifier.weight(1f))
-        if (chevron) {
-            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Ui.muted)
-        }
+        Text(value, color = Ui.ink, fontSize = 16.sp, lineHeight = valueLineHeight)
+        Spacer(Modifier.height(5.dp))
+        Text(label, color = Ui.muted, fontSize = 13.sp, lineHeight = 16.sp)
     }
 }
 
 @Composable
-private fun StoryCard(s: Story, onClick: () -> Unit) {
-    val ctx = LocalContext.current
+private fun MenuRow(label: String, onClick: () -> Unit, color: Color = Ui.ink, icon: @Composable () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, color = color) },
+        leadingIcon = icon,
+        onClick = onClick
+    )
+}
+
+/**
+ * The round photo. 96dp like Telegram. With a story the photo is pulled in by 3.5dp (Telegram's story inset)
+ * and a golden ring is drawn around it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HeroAvatar(
+    id: String,
+    name: String,
+    url: String?,
+    hasStory: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onBounds: (Rect) -> Unit
+) {
+    val inset = if (hasStory) 3.5.dp else 0.dp
+    val photo = 96.dp - inset * 2
     Box(
         modifier = Modifier
-            .width(120.dp)
-            .height(170.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (s.kind == "text") storyColor(s.bg) else Ui.soft)
-            .clickable(onClick = onClick)
+            .size(96.dp)
+            .onGloballyPositioned { onBounds(it.boundsInRoot()) }
+            .clip(CircleShape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center
     ) {
-        if (s.kind == "image") {
-            val req = remember(s.id) {
-                ImageRequest.Builder(ctx)
-                    .data(StoriesApi.mediaUrl(s.id))
-                    .addHeader("Authorization", "Bearer ${Session.token}")
-                    .crossfade(true)
-                    .build()
-            }
-            AsyncImage(
-                model = req,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        val cap = s.caption ?: ""
-        if (cap.isNotBlank()) {
-            if (s.kind == "text") {
-                Text(
-                    cap,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(10.dp)
+        Box(
+            modifier = Modifier
+                .size(photo)
+                .clip(CircleShape)
+                .background(Ui.soft)
+        ) {
+            // the letters show until the photo is there, or when there is no photo
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Avatar(id, name, photo) }
+            if (url != null) {
+                val ctx = LocalContext.current
+                val req = remember(url) {
+                    ImageRequest.Builder(ctx)
+                        .data(url)
+                        .addHeader("Authorization", "Bearer ${Session.token}")
+                        .crossfade(true)
+                        .build()
+                }
+                AsyncImage(
+                    model = req,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
                 )
-            } else {
-                Text(
-                    cap,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .background(Color(0x66000000))
-                        .padding(8.dp)
+            }
+        }
+        if (hasStory) {
+            Canvas(Modifier.fillMaxSize()) {
+                val sw = 2.33.dp.toPx()
+                drawCircle(
+                    brush = Brush.sweepGradient(colors = StoryGold, center = center),
+                    radius = (size.minDimension - sw) / 2f,
+                    style = Stroke(width = sw)
                 )
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun UserPageScreen(
     me: User,
@@ -250,7 +267,7 @@ fun UserPageScreen(
     onStories: (List<StoryGroup>, Int, Int) -> Unit,
     onSearch: () -> Unit,
     onMedia: () -> Unit,
-    // true when this person is in your contacts: then the gift button moves from the action row into the top-right menu
+    // true when this person is in your contacts
     isContact: Boolean = false,
     // called after a gift was sent from this page
     onSendGift: () -> Unit = {}
@@ -261,7 +278,6 @@ fun UserPageScreen(
     var bio by remember(conv.id) { mutableStateOf<String?>(cached?.bio) }
     var location by remember(conv.id) { mutableStateOf<String?>(cached?.location) }
     var blocked by remember(conv.id) { mutableStateOf(cached?.blocked ?: false) }
-    var ready by remember(conv.id) { mutableStateOf(cached != null || peer == null) }
     var muted by remember { mutableStateOf(conv.muted) }
     var group by remember { mutableStateOf<StoryGroup?>(null) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -283,12 +299,6 @@ fun UserPageScreen(
     var confirmRemove by remember { mutableStateOf(false) }
     val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
 
-    // never leave the page waiting: after a short moment show whatever is known
-    LaunchedEffect(conv.id) {
-        kotlinx.coroutines.delay(1200)
-        ready = true
-    }
-
     LaunchedEffect(conv.id) {
         if (peer != null) {
             // 1) what we already know, instantly
@@ -299,7 +309,6 @@ fun UserPageScreen(
                         location = p.location
                         blocked = p.blocked
                         ProfileCache.put(p)
-                        ready = true
                     }
                 }
             }
@@ -309,7 +318,6 @@ fun UserPageScreen(
                     bio = if (u.isNull("bio")) null else u.getString("bio")
                     location = if (u.isNull("location")) null else u.getString("location")
                     blocked = u.optBoolean("blocked")
-                    ready = true
                     val b0 = bio
                     val l0 = location
                     val k0 = blocked
@@ -317,7 +325,6 @@ fun UserPageScreen(
                     ProfileCache.put(fresh)
                     runIo({ Db.dao(appCtx).putProfileNow(fresh) }) { }
                 }.onFailure {
-                    ready = true
                     msg = it.message
                 }
             }
@@ -325,6 +332,28 @@ fun UserPageScreen(
             runIo({ GiftsApi.received(peer.id) }) { r ->
                 r.onSuccess { gifts = it }.onFailure { gifts = emptyList() }
             }
+        }
+    }
+
+    fun toggleMute() {
+        val on = !muted
+        muted = on
+        runIo({ Api.mute(conv.id, on) }) { r ->
+            r.onFailure {
+                muted = !on
+                msg = it.message
+            }
+        }
+    }
+
+    fun blockTap() {
+        if (blocked) {
+            val id = peer?.id ?: ""
+            runIo({ Api.block(id, false) }) { r ->
+                r.onSuccess { blocked = false }.onFailure { msg = it.message }
+            }
+        } else {
+            confirmBlock = true
         }
     }
 
@@ -336,341 +365,189 @@ fun UserPageScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
+            val avatarNow = peer?.let { Avatars.url(it.id) }
+            val story = group
+
+            // avatar: 35dp under the status bar (56dp action bar - 21dp)
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(top = 35.dp),
+                contentAlignment = Alignment.Center
             ) {
-                val avatarNow = peer?.let { Avatars.url(it.id) }
-                // a round photo at the top
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(top = 24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(112.dp)
-                            .clip(CircleShape)
-                            .background(Ui.soft)
-                            .onGloballyPositioned { avatarBox = it.boundsInRoot() }
-                            .then(if (avatarNow != null) Modifier.clickable { photoUrl = avatarNow } else Modifier)
-                    ) {
-                        // the letters show until the photo is there, or when there is no photo
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Avatar(peer?.id ?: conv.id, peer?.displayName ?: "?", 112.dp)
-                        }
-                        if (avatarNow != null) {
-                            val heroCtx = LocalContext.current
-                            val heroReq = remember(avatarNow) {
-                                ImageRequest.Builder(heroCtx)
-                                    .data(avatarNow)
-                                    .addHeader("Authorization", "Bearer ${Session.token}")
-                                    .crossfade(true)
-                                    .build()
-                            }
-                            AsyncImage(
-                                model = heroReq,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
-                }
-                // the name sits under the photo
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
-                            color = Ui.ink,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Badge(peer?.id, 20.sp, name = peer?.displayName)
-                    }
-                    if (peer != null) {
-                        Text("@" + peer.username, color = Ui.muted, fontSize = 14.sp)
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                val b = bio
-                if (!b.isNullOrBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(b, fontSize = 14.sp, color = Ui.muted, textAlign = TextAlign.Center)
-                } else if (!ready) {
-                    // keep the room of the bio line until we know whether there is one
-                    Spacer(Modifier.height(24.dp))
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.alpha(if (ready) 1f else 0f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val loc = location
-                    if (!loc.isNullOrBlank()) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(loc, fontSize = 13.5.sp, color = Ui.muted)
-                        Spacer(Modifier.width(16.dp))
-                    }
-                }
-                Spacer(Modifier.height(20.dp))
-                // the actions share one style so they read as a set; the gift button sits here unless this is a contact
-                Row(
-                    // 14dp from each screen edge: the page has 16dp, so this row reaches 2dp further out
-                    modifier = Modifier.fillMaxWidth().layout { measurable, constraints ->
-                        val extra = 2.dp.roundToPx()
-                        val p = measurable.measure(
-                            constraints.copy(minWidth = constraints.maxWidth + extra * 2, maxWidth = constraints.maxWidth + extra * 2)
-                        )
-                        layout(constraints.maxWidth, p.height) { p.place(-extra, 0) }
+                HeroAvatar(
+                    id = peer?.id ?: conv.id,
+                    name = peer?.displayName ?: "?",
+                    url = avatarNow,
+                    hasStory = story != null,
+                    onClick = {
+                        if (story != null) onStories(listOf(story), 0, -1)
+                        else if (avatarNow != null) photoUrl = avatarNow
                     },
-                    horizontalArrangement = Arrangement.spacedBy(7.dp)
-                ) {
-                    ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
-                        Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
-                    }
-                    ActionTile("Video", { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.ink) }
-                    ActionTile("Search", onSearch, Modifier.weight(1f)) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
-                    }
-                    if (peer != null && !blocked && !inContacts) {
-                        ActionTile("Gift", { shopOpen = true }, Modifier.weight(1f)) { GiftGlyph(Ui.ink, 24.dp) }
-                    }
-                }
-
-                Spacer(Modifier.height(28.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Story", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    val g = group
-                    if (g != null) {
-                        Text(
-                            "View all story",
-                            fontSize = 13.sp,
-                            color = Ui.muted,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onStories(listOf(g), 0, -1) }
-                                .padding(4.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                val g = group
-                if (g == null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Ui.soft)
-                            .padding(horizontal = 16.dp, vertical = 18.dp)
-                    ) {
-                        Text("No stories right now", color = Ui.muted, fontSize = 14.sp)
-                    }
-                } else {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(g.stories.size) { i ->
-                            StoryCard(g.stories[i]) { onStories(listOf(g), 0, i) }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(28.dp))
-                Text(
-                    "Preferences",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .align(Alignment.Start)
-                        .padding(horizontal = 4.dp)
+                    onLongClick = { if (avatarNow != null) photoUrl = avatarNow },
+                    onBounds = { avatarBox = it }
                 )
-                Spacer(Modifier.height(10.dp))
-                // Media, Starred and Mute live in one rounded card with the same left edge
+            }
+
+            // name: centre 28dp under the avatar (top 16dp, line 24dp), 19.6sp bold
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
+                    color = Ui.ink,
+                    fontSize = 19.6.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Badge(peer?.id, 20.sp, name = peer?.displayName)
+            }
+
+            // tiles start 85dp under the avatar; the row keeps Telegram's own 8dp above the tiles
+            Spacer(Modifier.height(37.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                ActionTile(if (muted) "Unmute" else "Mute", { toggleMute() }, Modifier.weight(1f)) { MuteGlyph(muted) }
+                ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
+                    Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                }
+                ActionTile("Video", { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.ink) }
+                ActionTile("Search", onSearch, Modifier.weight(1f)) {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                }
+            }
+
+            // 12dp under the tiles + 6dp empty row
+            Spacer(Modifier.height(18.dp))
+
+            if (peer != null) {
+                // the info card: bio, then username
                 Column(
                     modifier = Modifier
+                        .padding(horizontal = 12.dp)
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(Ui.soft)
                 ) {
-                    PrefRow("Media", onMedia) { GalleryGlyph(Ui.ink) }
-                    HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 54.dp))
-                    PrefRow("Starred Messages", { soon.show("Starred messages") }) {
-                        Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                    val b = bio
+                    if (!b.isNullOrBlank()) {
+                        InfoRow(b, "Bio", 19.sp)
                     }
-                    HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 54.dp))
+                    InfoRow("@" + peer.username, "Username", 20.sp)
+                }
+                Spacer(Modifier.height(14.5.dp))
+
+                if (!inContacts) {
                     Row(
                         modifier = Modifier
+                            .padding(horizontal = 12.dp)
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                            .height(50.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Ui.soft)
+                            .clickable { contactSheet = true }
+                            .padding(start = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Notifications, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(14.dp))
-                        Text("Mute notifications", fontSize = 16.sp, modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = muted,
-                            onCheckedChange = { on ->
-                                muted = on
-                                runIo({ Api.mute(conv.id, on) }) { r ->
-                                    r.onFailure {
-                                        muted = !on
-                                        msg = it.message
-                                    }
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = UserPageOnYellow,
-                                checkedTrackColor = UserPageYellow,
-                                checkedBorderColor = Color.Transparent,
-                                uncheckedThumbColor = Ui.muted,
-                                uncheckedTrackColor = Ui.bg,
-                                uncheckedBorderColor = Ui.line
-                            )
-                        )
+                        Icon(Icons.Default.Add, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(18.5.dp))
+                        Text("Add to contacts", color = Ui.ink, fontSize = 16.sp)
                     }
-                }
-
-                Spacer(Modifier.height(28.dp))
-                // risky actions get their own card, with red icons
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Ui.soft)
-                ) {
-                    PrefRow(
-                        if (blocked) "Unblock user" else "Block user",
-                        onClick = {
-                            if (blocked) {
-                                val id = peer?.id ?: ""
-                                runIo({ Api.block(id, false) }) { r ->
-                                    r.onSuccess { blocked = false }.onFailure { msg = it.message }
-                                }
-                            } else {
-                                confirmBlock = true
-                            }
-                        },
-                        color = MaterialTheme.colorScheme.error,
-                        chevron = false
-                    ) { BlockGlyph(MaterialTheme.colorScheme.error) }
-                    HorizontalDivider(color = Ui.line, modifier = Modifier.padding(start = 54.dp))
-                    PrefRow(
-                        "Report",
-                        onClick = { report = true },
-                        color = MaterialTheme.colorScheme.error,
-                        chevron = false
-                    ) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-                msg?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text(it, color = MaterialTheme.colorScheme.error)
-                }
-                // the gifts sit at the very bottom of the profile, like a tab under the info
-                Spacer(Modifier.height(20.dp))
-                GiftsSection(gifts = gifts, onOpen = { openGift = it })
+                    Spacer(Modifier.height(13.dp))
                 }
             }
+
+            msg?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+
+            // the gifts sit at the bottom of the profile like Telegram's tab; 6.5dp here puts the tiles 12dp from the edge
+            Box(Modifier.fillMaxWidth().padding(horizontal = 6.5.dp)) {
+                GiftsSection(gifts = gifts, onOpen = { openGift = it })
+            }
         }
-        // top right, over the photo: the menu and the close button.
-        // a contact's menu holds "Send a gift", "Edit contact" and "Delete contact"; anyone else's holds "Add to contacts"
+
+        // action bar: back arrow (button centre 28dp from the left) and the three dots (centre 29.5dp from the right)
         Row(
             modifier = Modifier
-                .align(Alignment.TopEnd)
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(8.dp),
+                .height(56.dp)
+                .padding(start = 4.dp, end = 5.5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (peer != null && !blocked) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Ui.ink)
+            }
+            Spacer(Modifier.weight(1f))
+            if (peer != null) {
                 Box {
-                    IconButton(
-                        onClick = { menuOpen = true },
-                        modifier = Modifier.background(Color(0x66000000), CircleShape)
-                    ) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Ui.ink)
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = Ui.bg) {
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        containerColor = Ui.bg,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        MenuRow("Media", { menuOpen = false; onMedia() }) { GalleryGlyph(Ui.ink) }
+                        MenuRow("Starred Messages", { menuOpen = false; soon.show("Starred messages") }) {
+                            Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                        }
+                        if (!blocked) {
+                            MenuRow("Send a gift", { menuOpen = false; shopOpen = true }) { GiftGlyph(Ui.ink, 24.dp) }
+                        }
                         if (inContacts) {
-                            DropdownMenuItem(
-                                text = { Text("Send a gift") },
-                                leadingIcon = { GiftGlyph(Ui.ink, 22.dp) },
-                                onClick = {
-                                    menuOpen = false
-                                    shopOpen = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Edit contact") },
-                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(22.dp)) },
-                                onClick = {
-                                    menuOpen = false
-                                    contactSheet = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Delete contact", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp)) },
-                                onClick = {
-                                    menuOpen = false
-                                    confirmRemove = true
-                                }
-                            )
+                            MenuRow("Edit contact", { menuOpen = false; contactSheet = true }) {
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                            }
+                            MenuRow("Delete contact", { menuOpen = false; confirmRemove = true }, MaterialTheme.colorScheme.error) {
+                                Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
+                            }
                         } else {
-                            DropdownMenuItem(
-                                text = { Text("Add to contacts") },
-                                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(22.dp)) },
-                                onClick = {
-                                    menuOpen = false
-                                    contactSheet = true
-                                }
-                            )
+                            MenuRow("Add to contacts", { menuOpen = false; contactSheet = true }) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                        HorizontalDivider(color = Ui.line)
+                        MenuRow(if (blocked) "Unblock user" else "Block user", { menuOpen = false; blockTap() }) { BlockGlyph(Ui.ink) }
+                        MenuRow("Report", { menuOpen = false; report = true }, MaterialTheme.colorScheme.error) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
-                Spacer(Modifier.width(8.dp))
-            }
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.background(Color(0x66000000), CircleShape)
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
             }
         }
+
         SoonToast(soon, 40.dp)
+
         // the floating send button: always one tap away while looking at a profile
         if (peer != null && !blocked) {
             Box(
@@ -680,6 +557,7 @@ fun UserPageScreen(
                     .padding(bottom = 11.dp)
             ) { GiftSendPill(giftName, onClick = { shopOpen = true }) }
         }
+
         val shownUrl = photoUrl
         if (shownUrl != null && peer != null) {
             ProfilePhotoViewer(peer.id, peer.username, peer.displayName, shownUrl, avatarBox) { photoUrl = null }
