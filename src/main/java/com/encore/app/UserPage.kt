@@ -12,6 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -39,6 +42,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -146,11 +150,13 @@ private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = 
             .background(Ui.soft)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
-        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) { icon() }
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = Ui.ink, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+        // measured from the reference row: icon 24dp starting 21.7dp from the top, label 11sp medium 4dp under it
+        Spacer(Modifier.height(21.7.dp))
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = Ui.ink, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
     }
 }
 
@@ -272,6 +278,10 @@ fun UserPageScreen(
     var openGift by remember { mutableStateOf<GiftItem?>(null) }
     var shopOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    // contacts: in your contacts when the caller says so or the saved list has them
+    val inContacts = isContact || ContactsStore.has(peer?.id)
+    var contactSheet by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
     val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
 
     // never leave the page waiting: after a short moment show whatever is known
@@ -383,7 +393,7 @@ fun UserPageScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            peer?.displayName ?: "Unknown",
+                            ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
                             color = Ui.ink,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
@@ -428,8 +438,15 @@ fun UserPageScreen(
                 Spacer(Modifier.height(20.dp))
                 // the actions share one style so they read as a set; the gift button sits here unless this is a contact
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // 14dp from each screen edge: the page has 16dp, so this row reaches 2dp further out
+                    modifier = Modifier.fillMaxWidth().layout { measurable, constraints ->
+                        val extra = 2.dp.roundToPx()
+                        val p = measurable.measure(
+                            constraints.copy(minWidth = constraints.maxWidth + extra * 2, maxWidth = constraints.maxWidth + extra * 2)
+                        )
+                        layout(constraints.maxWidth, p.height) { p.place(-extra, 0) }
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
                         Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
@@ -438,8 +455,8 @@ fun UserPageScreen(
                     ActionTile("Search", onSearch, Modifier.weight(1f)) {
                         Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
                     }
-                    if (peer != null && !blocked && !isContact) {
-                        ActionTile("Gift", { shopOpen = true }, Modifier.weight(1f)) { GiftGlyph(Ui.ink, 26.dp) }
+                    if (peer != null && !blocked && !inContacts) {
+                        ActionTile("Gift", { shopOpen = true }, Modifier.weight(1f)) { GiftGlyph(Ui.ink, 24.dp) }
                     }
                 }
 
@@ -598,7 +615,8 @@ fun UserPageScreen(
                 }
             }
         }
-        // top right, over the photo: the menu (only for contacts, it holds "Send a gift") and the close button
+        // top right, over the photo: the menu and the close button.
+        // a contact's menu holds "Send a gift", "Edit contact" and "Delete contact"; anyone else's holds "Add to contacts"
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -606,7 +624,7 @@ fun UserPageScreen(
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isContact && peer != null && !blocked) {
+            if (peer != null && !blocked) {
                 Box {
                     IconButton(
                         onClick = { menuOpen = true },
@@ -615,14 +633,41 @@ fun UserPageScreen(
                         Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = Ui.bg) {
-                        DropdownMenuItem(
-                            text = { Text("Send a gift") },
-                            leadingIcon = { GiftGlyph(Ui.ink, 22.dp) },
-                            onClick = {
-                                menuOpen = false
-                                shopOpen = true
-                            }
-                        )
+                        if (inContacts) {
+                            DropdownMenuItem(
+                                text = { Text("Send a gift") },
+                                leadingIcon = { GiftGlyph(Ui.ink, 22.dp) },
+                                onClick = {
+                                    menuOpen = false
+                                    shopOpen = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Edit contact") },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(22.dp)) },
+                                onClick = {
+                                    menuOpen = false
+                                    contactSheet = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete contact", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp)) },
+                                onClick = {
+                                    menuOpen = false
+                                    confirmRemove = true
+                                }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Add to contacts") },
+                                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(22.dp)) },
+                                onClick = {
+                                    menuOpen = false
+                                    contactSheet = true
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(8.dp))
@@ -662,6 +707,31 @@ fun UserPageScreen(
                 runIo({ GiftsApi.received(peer.id) }) { r -> r.onSuccess { gifts = it } }
                 onSendGift()
             }
+        )
+    }
+
+    if (contactSheet && peer != null) {
+        ContactEditSheet(
+            userId = peer.id,
+            username = peer.username,
+            displayName = peer.displayName,
+            onDismiss = { contactSheet = false }
+        )
+    }
+
+    if (confirmRemove && peer != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            containerColor = Ui.bg,
+            title = { Text("Delete ${ContactsStore.nameFor(peer.id, peer.displayName)}?") },
+            text = { Text("They will be removed from your contacts. Your chat with them stays.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemove = false
+                    ContactsStore.remove(peer.id) { r -> r.onFailure { msg = it.message } }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } }
         )
     }
 
