@@ -76,4 +76,5 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-messaging")
     implementation("io.getstream:stream-webrtc-android:1.3.9")
+    implementation("com.airbnb.android:lottie-compose:6.6.2")
 }
