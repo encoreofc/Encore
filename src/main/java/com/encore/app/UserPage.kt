@@ -274,7 +274,6 @@ fun UserPageScreen(
     val appCtx = LocalContext.current.applicationContext
     // gifts: null while loading, empty when the person has none
     var gifts by remember(conv.id) { mutableStateOf<List<GiftItem>?>(null) }
-    var giftsExpanded by remember(conv.id) { mutableStateOf(false) }
     var openGift by remember { mutableStateOf<GiftItem?>(null) }
     var shopOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -560,16 +559,6 @@ fun UserPageScreen(
                 }
 
                 Spacer(Modifier.height(28.dp))
-                GiftsSection(
-                    gifts = gifts,
-                    peerName = giftName,
-                    expanded = giftsExpanded,
-                    onToggleExpanded = { giftsExpanded = !giftsExpanded },
-                    onOpen = { openGift = it },
-                    onSend = { shopOpen = true }
-                )
-
-                Spacer(Modifier.height(28.dp))
                 // risky actions get their own card, with red icons
                 Column(
                     modifier = Modifier
@@ -611,7 +600,9 @@ fun UserPageScreen(
                     Spacer(Modifier.height(12.dp))
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
-                Spacer(Modifier.height(24.dp))
+                // the gifts sit at the very bottom of the profile, like a tab under the info
+                Spacer(Modifier.height(20.dp))
+                GiftsSection(gifts = gifts, onOpen = { openGift = it })
                 }
             }
         }
@@ -680,6 +671,15 @@ fun UserPageScreen(
             }
         }
         SoonToast(soon, 40.dp)
+        // the floating send button: always one tap away while looking at a profile
+        if (peer != null && !blocked) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 11.dp)
+            ) { GiftSendPill(giftName, onClick = { shopOpen = true }) }
+        }
         val shownUrl = photoUrl
         if (shownUrl != null && peer != null) {
             ProfilePhotoViewer(peer.id, peer.username, peer.displayName, shownUrl, avatarBox) { photoUrl = null }
