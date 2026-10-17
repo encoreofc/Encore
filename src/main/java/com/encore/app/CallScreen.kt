@@ -1,6 +1,7 @@
 package com.encore.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -38,10 +39,12 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +52,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
@@ -94,57 +98,122 @@ private fun paletteColor(pos: Float, k: Int): Color {
 
 private fun lerpF(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-private class CallLight(
-    val ringX: Float, val ringY: Float,     // resting place while calling (bottom glow)
-    val liveX: Float, val liveY: Float,     // resting place once the call is live (fills the screen)
-    val driftX: Float, val driftY: Float,   // how far it wanders
-    val speedX: Float, val speedY: Float,   // how fast it wanders
-    val offset: Float,
-    val radius: Float,                      // relative to the longer screen side
-    val color: Int
+/**
+ * The call background, built the way Telegram builds it: a tiny colour field (4 moving colour points blended
+ * smoothly) that is stretched over the whole screen with bilinear filtering, so there are no visible shapes
+ * or edges, only a soft flowing colour. It is always drawn on the same deep base, never on the app theme,
+ * so white text and waves read identically in light mode and dark mode.
+ */
+private const val FieldW = 48
+private const val FieldH = 80
+private const val BaseR = 0x12
+private const val BaseG = 0x14
+private const val BaseB = 0x1A
+
+private class CallField {
+    val bmp: android.graphics.Bitmap =
+        android.graphics.Bitmap.createBitmap(FieldW, FieldH, android.graphics.Bitmap.Config.ARGB_8888)
+    val px = IntArray(FieldW * FieldH)
+    val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.DITHER_FLAG)
+    val src = android.graphics.Rect(0, 0, FieldW, FieldH)
+    val dst = android.graphics.Rect()
+}
+
+private class CallPoint(
+    val bx: Float, val by: Float,           // where the colour point lives
+    val ax: Float, val ay: Float,           // how far it wanders
+    val sx: Float, val sy: Float,           // how fast it wanders
+    val offset: Float
 )
 
-private val CallLights = listOf(
-    CallLight(0.20f, 0.97f, 0.15f, 0.30f, 0.16f, 0.14f, 0.31f, 0.23f, 0.0f, 0.55f, 0),
-    CallLight(0.80f, 0.94f, 0.85f, 0.48f, 0.15f, 0.12f, 0.27f, 0.35f, 1.7f, 0.50f, 1),
-    CallLight(0.50f, 1.03f, 0.40f, 0.86f, 0.20f, 0.10f, 0.19f, 0.29f, 3.1f, 0.60f, 2),
-    CallLight(0.64f, 1.00f, 0.72f, 0.12f, 0.18f, 0.11f, 0.23f, 0.17f, 4.6f, 0.45f, 3)
+private val CallPoints = listOf(
+    CallPoint(0.25f, 0.20f, 0.22f, 0.15f, 0.31f, 0.23f, 0.0f),
+    CallPoint(0.80f, 0.30f, 0.18f, 0.18f, 0.27f, 0.35f, 1.7f),
+    CallPoint(0.30f, 0.80f, 0.22f, 0.16f, 0.19f, 0.29f, 3.1f),
+    CallPoint(0.78f, 0.85f, 0.20f, 0.14f, 0.23f, 0.17f, 4.6f)
 )
 
-private fun DrawScope.drawCallGlow(phase: Float, pos: Float, energy: Float, spread: Float) {
+private fun smooth01(e0: Float, e1: Float, x: Float): Float {
+    val t = ((x - e0) / (e1 - e0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+private fun DrawScope.drawCallGlow(field: CallField, phase: Float, pos: Float, energy: Float, spread: Float) {
     val w = size.width
     val h = size.height
-    val big = max(w, h)
-    val alpha = (0.40f + 0.10f * spread + 0.24f * energy).coerceAtMost(0.80f)
-    for (l in CallLights) {
-        val cx = lerpF(l.ringX, l.liveX, spread) +
-            l.driftX * (0.35f + 0.65f * spread) * sin(phase * l.speedX + l.offset)
-        val cy = lerpF(l.ringY, l.liveY, spread) +
-            l.driftY * (0.30f + 0.70f * spread) * cos(phase * l.speedY + l.offset * 1.3f)
-        val c = paletteColor(pos, l.color)
-        val r = l.radius * big * (1f + 0.22f * energy)
-        val center = Offset(cx * w, cy * h)
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(c.copy(alpha = alpha), c.copy(alpha = alpha * 0.42f), Color.Transparent),
-                center = center,
-                radius = r
-            ),
-            radius = r,
-            center = center
-        )
+    if (w <= 0f || h <= 0f) return
+    val aspect = h / w
+
+    // the four colour points and their colours at this moment
+    val n = CallPoints.size
+    val ptX = FloatArray(n)
+    val ptY = FloatArray(n)
+    val cr = FloatArray(n)
+    val cg = FloatArray(n)
+    val cb = FloatArray(n)
+    for (k in 0 until n) {
+        val p = CallPoints[k]
+        val baseY = lerpF(0.62f + 0.38f * p.by, p.by, spread) // while calling the colours sit low
+        ptX[k] = p.bx + p.ax * sin(phase * p.sx + p.offset)
+        ptY[k] = baseY + p.ay * (0.4f + 0.6f * spread) * cos(phase * p.sy + p.offset * 1.3f)
+        val c = paletteColor(pos, k)
+        cr[k] = c.red * 255f
+        cg[k] = c.green * 255f
+        cb[k] = c.blue * 255f
     }
+
+    // a little less bright overall, and the colour no longer brightens when someone speaks
+    val lift = 0.92f
+    val px = field.px
+    for (j in 0 until FieldH) {
+        val v = (j + 0.5f) / FieldH
+        // calling / ringing: colour rises from the bottom edge; live: colour fills the whole screen
+        val cover = lerpF(0.94f * smooth01(0.30f, 1.0f, v), 1f, spread)
+        for (i in 0 until FieldW) {
+            val u = (i + 0.5f) / FieldW
+            var sw = 0f
+            var r = 0f
+            var g = 0f
+            var b = 0f
+            for (k in 0 until n) {
+                val dx = u - ptX[k]
+                val dy = (v - ptY[k]) * aspect
+                val d = dx * dx + dy * dy + 0.05f
+                val wt = 1f / (d * d)
+                sw += wt
+                r += cr[k] * wt
+                g += cg[k] * wt
+                b += cb[k] * wt
+            }
+            r = (r / sw) * lift
+            g = (g / sw) * lift
+            b = (b / sw) * lift
+            // blending several colours dulls them; give back just a little richness so the mix is never muddy
+            val luma = 0.299f * r + 0.587f * g + 0.114f * b
+            r = luma + (r - luma) * 1.08f
+            g = luma + (g - luma) * 1.08f
+            b = luma + (b - luma) * 1.08f
+            val rr = (BaseR + (r - BaseR) * cover).coerceIn(0f, 255f).toInt()
+            val gg = (BaseG + (g - BaseG) * cover).coerceIn(0f, 255f).toInt()
+            val bb = (BaseB + (b - BaseB) * cover).coerceIn(0f, 255f).toInt()
+            px[j * FieldW + i] = (0xFF shl 24) or (rr shl 16) or (gg shl 8) or bb
+        }
+    }
+    field.bmp.setPixels(px, 0, FieldW, 0, 0, FieldW, FieldH)
+    field.dst.set(0, 0, w.toInt(), h.toInt())
+    drawIntoCanvas { it.nativeCanvas.drawBitmap(field.bmp, field.src, field.dst, field.paint) }
+
     // soft shadows at top and bottom (Telegram uses 160dp) keep the name and buttons readable on any color
     drawRect(
         brush = Brush.verticalGradient(
-            colors = listOf(Color.Black.copy(alpha = 0.34f), Color.Transparent),
+            colors = listOf(Color.Black.copy(alpha = 0.30f), Color.Transparent),
             startY = 0f,
             endY = 160.dp.toPx()
         )
     )
     drawRect(
         brush = Brush.verticalGradient(
-            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f)),
+            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.20f)),
             startY = h - 160.dp.toPx(),
             endY = h
         )
@@ -287,11 +356,28 @@ private fun CallScreen() {
         }
     }
 
+    // The call is always colour on a deep base (like Telegram), so the system bars must always use light icons
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.context as? Activity)?.window
+        val ctrl = window?.let { WindowCompat.getInsetsController(it, view) }
+        val prevStatus = ctrl?.isAppearanceLightStatusBars
+        val prevNav = ctrl?.isAppearanceLightNavigationBars
+        ctrl?.isAppearanceLightStatusBars = false
+        ctrl?.isAppearanceLightNavigationBars = false
+        onDispose {
+            if (prevStatus != null) ctrl?.isAppearanceLightStatusBars = prevStatus
+            if (prevNav != null) ctrl?.isAppearanceLightNavigationBars = prevNav
+        }
+    }
+
+    val field = remember { CallField() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Ui.bg)
-            .drawBehind { drawCallGlow(motion, pos.value, energy, spread) }
+            .background(Color(0xFF12141A))
+            .drawBehind { drawCallGlow(field, motion, pos.value, energy, spread) }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
     ) {
         Column(
