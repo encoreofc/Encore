@@ -30,6 +30,7 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStatsReport
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
@@ -51,6 +52,9 @@ object CallManager {
     var speaker by mutableStateOf(false)
         private set
     var seconds by mutableStateOf(0)
+    /** Live voice loudness 0..1: how loud the other person is, and how loud this device's mic is. Drives the call screen colors. */
+    var level by mutableStateOf(0f)
+    var myLevel by mutableStateOf(0f)
         private set
 
     private val main = Handler(Looper.getMainLooper())
@@ -303,6 +307,8 @@ object CallManager {
         acceptCallId = null
         pulled = false
         seconds = 0
+        level = 0f
+        myLevel = 0f
         toast(note)
     }
 
@@ -405,6 +411,36 @@ object CallManager {
         }, 1000L)
     }
 
+    /** Polls WebRTC stats about 8 times a second for the voice loudness of both sides. */
+    private fun startLevels(g: Int) {
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (g != gen || phase != CallPhase.Active) return
+                try {
+                    pc?.getStats { report: RTCStatsReport ->
+                        var inLvl = 0f
+                        var outLvl = 0f
+                        for (s in report.statsMap.values) {
+                            val m = s.members
+                            if (m["kind"] != "audio") continue
+                            val lv = (m["audioLevel"] as? Number)?.toFloat() ?: continue
+                            if (s.type == "inbound-rtp") inLvl = maxOf(inLvl, lv)
+                            else if (s.type == "media-source") outLvl = maxOf(outLvl, lv)
+                        }
+                        ui {
+                            if (g == gen) {
+                                level = inLvl.coerceIn(0f, 1f)
+                                myLevel = if (muted) 0f else outLvl.coerceIn(0f, 1f)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                }
+                main.postDelayed(this, 120L)
+            }
+        }, 120L)
+    }
+
     private fun startPing(g: Int, id: String) {
         main.postDelayed(object : Runnable {
             override fun run() {
@@ -504,6 +540,7 @@ object CallManager {
                                 if (g == gen && phase == CallPhase.Connecting) {
                                     phase = CallPhase.Active
                                     startTimer(g)
+                                    startLevels(g)
                                 }
                             }
                             PeerConnection.IceConnectionState.FAILED -> ui {
