@@ -6,13 +6,17 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -27,24 +31,141 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.sin
+import kotlin.math.sqrt
 
-private val CallRed = Color(0xFFE5484D)
-private val CallGreen = Color(0xFF2E9E5B)
+// Same red / green Telegram uses for decline / accept
+private val CallRed = Color(0xFFFF3846)
+private val CallGreen = Color(0xFF4DD156)
 
 // The same yellow the app already uses (chat-list badge, login button); move into Ui with the global theme pass.
 private val CallAccent = Color(0xFFFFC400)
+
+/* ------------------------------------------------------------------------------------------
+ * Call color language
+ *
+ * Every palette has 4 colors (one per light in the scene). The call always sits on ONE palette
+ * and slides smoothly to the next:
+ *   - while calling / ringing / connecting: slowly and continuously, glowing from the bottom
+ *   - once answered: the glow rises and fills the screen, and a new palette arrives every minute
+ *   - while anyone speaks: the lights swell and drift faster, following the real voice level
+ * Gold is first because it is Encore's signature; the call always starts on it.
+ * ---------------------------------------------------------------------------------------- */
+private val CallPalettes: List<List<Color>> = listOf(
+    listOf(Color(0xFFFFC400), Color(0xFFFF8F00), Color(0xFFB26A00), Color(0xFFFFE082)), // Gold
+    listOf(Color(0xFF7C4DFF), Color(0xFF3D5AFE), Color(0xFFD500F9), Color(0xFF536DFE)), // Violet
+    listOf(Color(0xFF0091EA), Color(0xFF00BFA5), Color(0xFF2962FF), Color(0xFF18FFFF)), // Ocean
+    listOf(Color(0xFF00C853), Color(0xFF00897B), Color(0xFF64DD17), Color(0xFF1DE9B6)), // Emerald
+    listOf(Color(0xFFFF6D00), Color(0xFFFF1744), Color(0xFFFFC400), Color(0xFFD50000)), // Sunset
+    listOf(Color(0xFFF50057), Color(0xFFAA00FF), Color(0xFFFF4081), Color(0xFFC51162))  // Rose
+)
+
+/** Color [k] of the palette scale at position [pos] (whole numbers are pure palettes, in between is a smooth blend). */
+private fun paletteColor(pos: Float, k: Int): Color {
+    val n = CallPalettes.size
+    val i = floor(pos).toInt()
+    val f = pos - floor(pos)
+    val s = f * f * (3f - 2f * f)
+    val a = CallPalettes[((i % n) + n) % n][k]
+    val b = CallPalettes[(((i + 1) % n) + n) % n][k]
+    return lerp(a, b, s)
+}
+
+private fun lerpF(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+
+private class CallLight(
+    val ringX: Float, val ringY: Float,     // resting place while calling (bottom glow)
+    val liveX: Float, val liveY: Float,     // resting place once the call is live (fills the screen)
+    val driftX: Float, val driftY: Float,   // how far it wanders
+    val speedX: Float, val speedY: Float,   // how fast it wanders
+    val offset: Float,
+    val radius: Float,                      // relative to the longer screen side
+    val color: Int
+)
+
+private val CallLights = listOf(
+    CallLight(0.20f, 0.97f, 0.15f, 0.30f, 0.16f, 0.14f, 0.31f, 0.23f, 0.0f, 0.55f, 0),
+    CallLight(0.80f, 0.94f, 0.85f, 0.48f, 0.15f, 0.12f, 0.27f, 0.35f, 1.7f, 0.50f, 1),
+    CallLight(0.50f, 1.03f, 0.40f, 0.86f, 0.20f, 0.10f, 0.19f, 0.29f, 3.1f, 0.60f, 2),
+    CallLight(0.64f, 1.00f, 0.72f, 0.12f, 0.18f, 0.11f, 0.23f, 0.17f, 4.6f, 0.45f, 3)
+)
+
+private fun DrawScope.drawCallGlow(phase: Float, pos: Float, energy: Float, spread: Float) {
+    val w = size.width
+    val h = size.height
+    val big = max(w, h)
+    val alpha = (0.40f + 0.10f * spread + 0.24f * energy).coerceAtMost(0.80f)
+    for (l in CallLights) {
+        val cx = lerpF(l.ringX, l.liveX, spread) +
+            l.driftX * (0.35f + 0.65f * spread) * sin(phase * l.speedX + l.offset)
+        val cy = lerpF(l.ringY, l.liveY, spread) +
+            l.driftY * (0.30f + 0.70f * spread) * cos(phase * l.speedY + l.offset * 1.3f)
+        val c = paletteColor(pos, l.color)
+        val r = l.radius * big * (1f + 0.22f * energy)
+        val center = Offset(cx * w, cy * h)
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(c.copy(alpha = alpha), c.copy(alpha = alpha * 0.42f), Color.Transparent),
+                center = center,
+                radius = r
+            ),
+            radius = r,
+            center = center
+        )
+    }
+    // soft shadows at top and bottom (Telegram uses 160dp) keep the name and buttons readable on any color
+    drawRect(
+        brush = Brush.verticalGradient(
+            colors = listOf(Color.Black.copy(alpha = 0.34f), Color.Transparent),
+            startY = 0f,
+            endY = 160.dp.toPx()
+        )
+    )
+    drawRect(
+        brush = Brush.verticalGradient(
+            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f)),
+            startY = h - 160.dp.toPx(),
+            endY = h
+        )
+    )
+}
+
+/** Frosted-glass surface: a light translucent fill with a bright-to-faint edge. */
+private fun Modifier.callGlass(shape: Shape, fill: Float = 0.12f): Modifier =
+    this
+        .clip(shape)
+        .background(
+            Brush.verticalGradient(
+                listOf(Color.White.copy(alpha = fill + 0.06f), Color.White.copy(alpha = (fill - 0.04f).coerceAtLeast(0.02f)))
+            ),
+            shape
+        )
+        .border(
+            1.dp,
+            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.34f), Color.White.copy(alpha = 0.06f))),
+            shape
+        )
 
 private fun callIcon(name: String, path: String): ImageVector =
     ImageVector.Builder(
@@ -131,10 +252,46 @@ private fun CallScreen() {
         else -> ""
     }
 
+    val live = phase == CallPhase.Active
+    val minute = if (live) CallManager.seconds / 60 else 0
+
+    // Which palette we are on. Before the answer it glides on slowly and forever; after the answer it
+    // settles onto the next palette and then moves to a new one at every full minute.
+    val pos = remember { Animatable(0f) }
+    LaunchedEffect(live, minute) {
+        if (live) {
+            pos.animateTo(floor(pos.value) + 1f, tween(4200, easing = FastOutSlowInEasing))
+        } else {
+            while (true) pos.animateTo(pos.value + 1f, tween(9000, easing = LinearEasing))
+        }
+    }
+
+    // The glow climbs from the bottom edge to the whole screen when the call becomes live
+    val spread by animateFloatAsState(if (live) 1f else 0f, tween(1400, easing = FastOutSlowInEasing), label = "callSpread")
+
+    // Voice energy 0..1 from the real loudness of both sides (WebRTC levels are small, so lift them a little)
+    val raw = max(CallManager.level, CallManager.myLevel)
+    val energyTarget = if (live) sqrt((raw * 3.5f).coerceIn(0f, 1f)) else 0f
+    val energy by animateFloatAsState(energyTarget, tween(180), label = "callEnergy")
+    val energyNow by rememberUpdatedState(energy)
+
+    // Motion clock: runs faster the louder the voice is, so colors drift calmly when quiet and move when speaking
+    var motion by remember { mutableStateOf(0f) }
+    LaunchedEffect(Unit) {
+        var last = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (last != 0L) motion += (now - last) / 1_000_000_000f * (0.45f + 1.7f * energyNow)
+                last = now
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Ui.bg)
+            .drawBehind { drawCallGlow(motion, pos.value, energy, spread) }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
     ) {
         Column(
@@ -143,49 +300,66 @@ private fun CallScreen() {
                 .statusBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(20.dp))
-            CallBadge(live = phase == CallPhase.Active)
-            Spacer(Modifier.weight(1f))
-            AvatarHalo(
-                pulsing = phase == CallPhase.Calling || phase == CallPhase.Ringing || phase == CallPhase.Connecting
+            // Telegram: top block is 93dp, the small pill sits 17dp from the top
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(93.dp),
+                contentAlignment = Alignment.TopCenter
             ) {
-                Avatar(CallManager.peerId, CallManager.peerName, 132.dp)
+                Box(Modifier.padding(top = 17.dp)) { CallBadge(live = live) }
             }
-            Spacer(Modifier.height(24.dp))
-            Text(
-                CallManager.peerName,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Ui.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(status, fontSize = 15.sp, color = Ui.muted)
+            // Telegram: 204dp avatar view, 135dp photo
+            AvatarHalo(
+                pulsing = phase == CallPhase.Calling || phase == CallPhase.Ringing || phase == CallPhase.Connecting,
+                energy = { energy },
+                motion = { motion }
+            ) {
+                Avatar(CallManager.peerId, CallManager.peerName, 135.dp)
+            }
+            // Telegram: name (28sp) starts 282dp below the status bar, which is 15dp up into the avatar view
+            Column(
+                modifier = Modifier.offset(y = (-15).dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    CallManager.peerName,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(status, fontSize = 15.sp, color = Color.White.copy(alpha = 0.78f))
+            }
             Spacer(Modifier.weight(1f))
 
-            ControlSheet {
-                if (phase == CallPhase.Ringing) {
-                    RoundButton(CallRed, "Decline", hangup = true) { CallManager.hangup() }
-                    RoundButton(CallGreen, "Accept", hangup = false) { gate { CallManager.accept() } }
-                } else {
-                    ToggleButton(if (CallManager.muted) MicOffIcon else MicIcon, "Mute", CallManager.muted) { CallManager.toggleMute() }
-                    RoundButton(CallRed, "End", hangup = true) { CallManager.hangup() }
-                    ToggleButton(SpeakerIcon, "Speaker", CallManager.speaker) { CallManager.toggleSpeaker() }
+            if (phase == CallPhase.Ringing) {
+                // Telegram accept/decline: 186dp tall, 60dp buttons scaled up by 1.15
+                IncomingButtons(
+                    onDecline = { CallManager.hangup() },
+                    onAccept = { gate { CallManager.accept() } }
+                )
+            } else {
+                ControlSheet { slot ->
+                    ToggleButton(if (CallManager.muted) MicOffIcon else MicIcon, if (CallManager.muted) "Unmute" else "Mute", CallManager.muted, slot) { CallManager.toggleMute() }
+                    RoundButton(CallRed, "End", hangup = true, size = 52.dp, slot = slot) { CallManager.hangup() }
+                    ToggleButton(SpeakerIcon, "Speaker", CallManager.speaker, slot) { CallManager.toggleSpeaker() }
                 }
             }
         }
     }
 }
 
-/** Small pill at the top: brand + live state. */
+/** Small glass pill at the top: brand + live state. */
 @Composable
 private fun CallBadge(live: Boolean) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Ui.soft)
+            .callGlass(RoundedCornerShape(50))
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -193,96 +367,138 @@ private fun CallBadge(live: Boolean) {
             modifier = Modifier
                 .size(8.dp)
                 .clip(CircleShape)
-                .background(if (live) CallAccent else Ui.muted)
+                .background(if (live) CallAccent else Color.White.copy(alpha = 0.55f))
         )
         Spacer(Modifier.width(8.dp))
-        Text("Encore voice call", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
+        Text("Encore voice call", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
     }
 }
 
-/** Avatar with a ring; while the call is ringing or connecting the ring pulses outwards. */
+/** Avatar (Telegram: 204dp view) with the two soft voice waves; they breathe gently while calling and follow the voice once connected. */
 @Composable
-private fun AvatarHalo(pulsing: Boolean, content: @Composable BoxScope.() -> Unit) {
-    val halo: Modifier = if (pulsing) {
-        val t = rememberInfiniteTransition(label = "callHalo")
-        val p by t.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
-            label = "callHaloPhase"
-        )
-        Modifier.drawBehind { drawPulse(p) }
-    } else {
-        Modifier.drawBehind { drawRing() }
-    }
+private fun AvatarHalo(
+    pulsing: Boolean,
+    energy: () -> Float,
+    motion: () -> Float,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val t = rememberInfiniteTransition(label = "callHalo")
+    val breath by t.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "callHaloBreath"
+    )
     Box(
-        modifier = Modifier.size(236.dp).then(halo),
+        modifier = Modifier
+            .size(204.dp)
+            .drawBehind { drawVoiceWaves(if (pulsing) breath else energy(), motion()) },
         contentAlignment = Alignment.Center,
         content = content
     )
 }
 
-private fun DrawScope.drawRing() {
-    drawCircle(
-        color = CallAccent.copy(alpha = 0.55f),
-        radius = 66.dp.toPx() + 8.dp.toPx(),
-        style = Stroke(width = 2.dp.toPx())
-    )
-}
-
-private fun DrawScope.drawPulse(p: Float) {
-    val r0 = 66.dp.toPx() + 8.dp.toPx()
-    val r1 = size.minDimension / 2f
-    drawRing()
-    for (k in 0 until 3) {
-        val f = (p + k / 3f) % 1f
-        drawCircle(
-            color = CallAccent.copy(alpha = 0.5f * (1f - f)),
-            radius = r0 + (r1 - r0) * f,
-            style = Stroke(width = 2.dp.toPx())
-        )
+/** One soft filled blob with 8 gentle lobes, like Telegram's avatar waves. */
+private fun DrawScope.drawWaveBlob(color: Color, radius: Float, wobble: Float, phase: Float) {
+    val path = androidx.compose.ui.graphics.Path()
+    val steps = 72
+    for (i in 0..steps) {
+        val a = (i.toFloat() / steps) * 2f * Math.PI.toFloat()
+        val r = radius * (1f + wobble * sin(8f * a + phase))
+        val x = center.x + r * cos(a)
+        val y = center.y + r * sin(a)
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
+    path.close()
+    drawPath(path, color)
 }
 
-/** Bottom sheet holding the call controls (same sheet language as the rest of the app). */
+/**
+ * Two soft filled waves around the avatar that follow the voice level.
+ * Telegram: outer wave 104..111dp at 8% white, inner wave 12dp smaller at 14% white, scale 0.8 + 0.4 * level.
+ */
+private fun DrawScope.drawVoiceWaves(e: Float, motion: Float) {
+    val scale = 0.8f + 0.4f * e
+    val wobble = 0.02f + 0.035f * e
+    drawWaveBlob(Color.White.copy(alpha = 20f / 255f), (104.dp.toPx() + 7.dp.toPx() * e) * scale, wobble, motion * 1.1f)
+    drawWaveBlob(Color.White.copy(alpha = 36f / 255f), (92.dp.toPx() + 7.dp.toPx() * e) * scale, wobble, -motion * 1.4f + 1.2f)
+}
+
+/** Incoming call buttons, placed like Telegram's accept/decline view. */
 @Composable
-private fun ControlSheet(content: @Composable RowScope.() -> Unit) {
-    Column(
+private fun IncomingButtons(onDecline: () -> Unit, onAccept: () -> Unit) {
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-            .background(Ui.soft)
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .height(186.dp)
     ) {
-        Spacer(Modifier.height(12.dp))
-        Box(
-            modifier = Modifier
-                .width(36.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Ui.muted.copy(alpha = 0.4f))
-        )
-        Spacer(Modifier.height(28.dp))
+        // Telegram: 27dp view margin + 46dp inner padding, 60dp buttons, whole view scaled 1.15 around its center
+        val scale = 1.15f
+        val half = maxWidth / 2
+        val inset = half - (half - (27.dp + 46.dp + 30.dp)) * scale - 30.dp * scale
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.Top,
-            content = content
-        )
-        Spacer(Modifier.height(32.dp))
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = inset, end = inset, top = 40.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            RoundButton(CallRed, "Decline", hangup = true, size = 69.dp, labelSp = 12.65f, slot = 69.dp, onClick = onDecline)
+            RoundButton(CallGreen, "Accept", hangup = false, size = 69.dp, labelSp = 12.65f, slot = 69.dp, onClick = onAccept)
+        }
+    }
+}
+
+/**
+ * Holds the in-call controls. Telegram lays four 68dp slots across the screen and centers the visible ones;
+ * the row is at least 80dp tall and sits directly on the bottom inset.
+ */
+@Composable
+private fun ControlSheet(content: @Composable RowScope.(slot: Dp) -> Unit) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+    ) {
+        val slot = maxWidth / 4
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 80.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Top
+        ) {
+            content(slot)
+        }
     }
 }
 
 @Composable
-private fun RoundButton(color: Color, label: String, hangup: Boolean, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun RoundButton(
+    color: Color,
+    label: String,
+    hangup: Boolean,
+    size: Dp = 60.dp,
+    labelSp: Float = 11f,
+    slot: Dp = 68.dp,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.width(slot), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(72.dp)
+                .size(size)
                 .clip(CircleShape)
                 .background(color)
+                .background(
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.20f), Color.Transparent)),
+                    CircleShape
+                )
+                .border(
+                    1.dp,
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.38f), Color.White.copy(alpha = 0.04f))),
+                    CircleShape
+                )
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
@@ -290,34 +506,39 @@ private fun RoundButton(color: Color, label: String, hangup: Boolean, onClick: (
                 Icons.Default.Call,
                 contentDescription = label,
                 tint = Color.White,
-                modifier = Modifier.rotate(if (hangup) 135f else 0f)
+                modifier = Modifier
+                    .size(size * (28f / 60f))
+                    .rotate(if (hangup) 135f else 0f)
             )
         }
-        Spacer(Modifier.height(8.dp))
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
+        Spacer(Modifier.height(4.5.dp))
+        Text(label, fontSize = labelSp.sp, fontWeight = FontWeight.Medium, color = Color.White)
     }
 }
 
 @Composable
-private fun ToggleButton(icon: ImageVector, label: String, on: Boolean, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ToggleButton(icon: ImageVector, label: String, on: Boolean, slot: Dp = 68.dp, onClick: () -> Unit) {
+    Column(modifier = Modifier.width(slot), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(if (on) Ui.ink else Ui.bg)
+                .size(53.5.dp)
+                .then(
+                    if (on) Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.94f))
+                    else Modifier.callGlass(CircleShape, fill = 0.14f)
+                )
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 icon,
                 contentDescription = label,
-                tint = if (on) Ui.onInk else Ui.ink,
-                modifier = Modifier.size(28.dp)
+                tint = if (on) Color(0xFF14161B) else Color.White,
+                modifier = Modifier.size(25.dp)
             )
         }
-        Spacer(Modifier.height(8.dp))
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
-        Text(if (on) "On" else "Off", fontSize = 12.sp, color = Ui.muted)
+        Spacer(Modifier.height(4.5.dp))
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color.White)
     }
 }
