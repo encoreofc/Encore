@@ -29,6 +29,9 @@ object CallNotification {
     const val EXTRA_ACCEPT = "incoming_call_accept"
     const val ACTION_DECLINE = "com.encore.app.CALL_DECLINE"
 
+    /** The caller waits 45 s, so the phone rings for the same time. */
+    private const val RING_MS = 45_000L
+
     /** Creates the call channel (safe to call repeatedly). */
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -57,6 +60,7 @@ object CallNotification {
         if (!force && CallManager.phase != CallPhase.Idle && CallManager.activeCallId == id) return
         val name = d["caller_name"] ?: "Someone"
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (!nm.areNotificationsEnabled()) return // nothing can ring or show with notifications switched off
         ensureChannel(ctx)
         val open = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -87,7 +91,7 @@ object CallNotification {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setAutoCancel(true)
-            .setTimeoutAfter(30000L)
+            .setTimeoutAfter(RING_MS)
             .setContentIntent(pi)
             .setFullScreenIntent(pi, true)
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, answerPi))
