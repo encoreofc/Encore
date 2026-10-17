@@ -1,6 +1,7 @@
 package com.encore.app
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
@@ -18,10 +19,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -291,12 +297,13 @@ fun GiftDarkButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    height: Dp = 52.dp,
     icon: (@Composable () -> Unit)? = null
 ) {
     Row(
         modifier = modifier
-            .height(52.dp)
-            .clip(RoundedCornerShape(26.dp))
+            .height(height)
+            .clip(RoundedCornerShape(height / 2))
             .background(Ui.ink)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp),
@@ -381,32 +388,70 @@ private fun GiftArtView(url: String?, kind: String, name: String, size: Dp, loop
 @Composable
 private fun GiftArt(g: GiftItem, size: Dp, loop: Boolean = true) = GiftArtView(g.artUrl, g.artKind, g.name, size, loop)
 
+private val GiftLimitedTop = Color(0xFFA67BE8)
+private val GiftLimitedBottom = Color(0xFF7B4CC8)
+private val GiftRibbon = Color(0xFF5B3AA6)
+
+/**
+ * One gift in the profile grid (measured from Telegram's GiftCell): card corners 11dp, picture 80dp
+ * in the middle, sender mark 20dp placed 2dp from the corner, a 50dp corner ribbon with the number on
+ * limited editions. Cells are 114dp tall; three across with 7dp between them.
+ */
 @Composable
-private fun GiftTile(g: GiftItem, modifier: Modifier, onClick: () -> Unit) {
+private fun GiftTile(g: GiftItem, fill: Color, modifier: Modifier, onClick: () -> Unit) {
+    val serial = g.serial
     Box(
         modifier = modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Ui.soft)
+            .height(114.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(
+                if (serial != null) Brush.verticalGradient(listOf(GiftLimitedTop, GiftLimitedBottom))
+                else Brush.verticalGradient(listOf(fill, fill))
+            )
             .clickable(onClick = onClick)
     ) {
-        Box(Modifier.align(Alignment.Center)) { GiftArt(g, 72.dp, loop = false) }
+        Box(Modifier.align(Alignment.Center)) { GiftArt(g, 80.dp, loop = false) }
         Box(
             Modifier
                 .align(Alignment.TopStart)
-                .padding(8.dp)
+                .padding(start = 2.dp, top = 2.dp)
         ) { GiftSender(g, 20.dp) }
-        val serial = g.serial
         if (serial != null) {
+            // 50dp square in the top-right corner; the band runs at 45 degrees across it
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Ui.ink)
-                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 1.dp)
+                    .size(50.dp)
+                    .clipToBounds()
             ) {
-                Text("#$serial", color = Ui.onInk, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val p = Path().apply {
+                        moveTo(w - 36.dp.toPx(), 0f)
+                        lineTo(w - 14.dp.toPx(), 0f)
+                        lineTo(w, 14.dp.toPx())
+                        lineTo(w, 36.dp.toPx())
+                        close()
+                    }
+                    drawPath(p, GiftRibbon)
+                }
+                Box(
+                    modifier = Modifier
+                        .offset(x = 19.5.dp, y = 3.5.dp)
+                        .size(36.dp, 18.dp)
+                        .rotate(45f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "#" + java.text.NumberFormat.getInstance().format(serial),
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
         }
     }
@@ -416,120 +461,167 @@ private fun GiftTile(g: GiftItem, modifier: Modifier, onClick: () -> Unit) {
 // The parts the profile page uses
 // ---------------------------------------------------------------------------
 
-private const val GIFTS_PREVIEW = 6
-
 /**
- * The Gifts block on a profile. [gifts] is null while loading, empty when there are none.
- * Shows two rows of three, with a switch to show everything.
+ * Telegram's "top panel" glass (BlurredBackgroundProviderImpl.topPanel): the page colour at 85% so what is
+ * behind shows through, a 0.4dp edge that is a little darker at the bottom, and a very small shadow
+ * (2.667dp blur, 0.85dp down). The values for dark mode are the ones Telegram uses for dark.
  */
 @Composable
-fun GiftsSection(
-    gifts: List<GiftItem>?,
-    peerName: String,
-    expanded: Boolean,
-    onToggleExpanded: () -> Unit,
-    onOpen: (GiftItem) -> Unit,
-    onSend: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Gifts", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            if (!gifts.isNullOrEmpty()) {
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Ui.soft)
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Text("${gifts.size}", fontSize = 12.sp, color = Ui.muted, fontWeight = FontWeight.Medium)
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            if (gifts != null && gifts.size > GIFTS_PREVIEW) {
-                Text(
-                    if (expanded) "Show less" else "View all gifts",
-                    fontSize = 13.sp,
-                    color = Ui.muted,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onToggleExpanded)
-                        .padding(4.dp)
-                )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        when {
-            gifts == null -> {
-                // keeps the room of the block while it loads so the page does not jump
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(104.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Ui.soft)
-                )
-            }
-            gifts.isEmpty() -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Ui.soft)
-                        .clickable(onClick = onSend)
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GiftGlyph(Ui.ink, 30.dp)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("No gifts yet", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            if (peerName.isBlank()) "Be the first to send one" else "Be the first to send one to $peerName",
-                            fontSize = 13.sp,
-                            color = Ui.muted
-                        )
+private fun GlassSurface(radius: Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val shape = RoundedCornerShape(radius)
+    val dark = Ui.bg.luminance() < 0.5f
+    val edgeTop = Color(if (dark) 0x06FFFFFF else 0x11000000)
+    val edgeBottom = Color(if (dark) 0x11FFFFFF else 0x20000000)
+    val shadowColor = Color(if (dark) 0x04FFFFFF else 0x20000000)
+    Box(
+        modifier = modifier
+            .shadow(2.667.dp, shape, clip = false, ambientColor = shadowColor, spotColor = shadowColor)
+            .clip(shape)
+            .background(Ui.bg.copy(alpha = 0.85f))
+            .border(0.4.dp, Brush.verticalGradient(listOf(edgeTop, edgeBottom)), shape)
+    ) { content() }
+}
+
+/**
+ * The Gifts block at the bottom of a profile, like Telegram's tab: a frosted tab pill (36dp tall inside a
+ * 50dp strip, corners 18dp, tab text 15sp bold, tab padding 16dp) reading "Gifts" with a few of the gift pictures,
+ * then every gift in a grid. The grid is 9dp from the screen edges, cells 7dp apart across and 8dp down; the page's own 16dp side padding is
+ * taken back so the grid reaches the same edges. The last row leaves room for the floating send button.
+ */
+@Composable
+fun GiftsSection(gifts: List<GiftItem>?, onOpen: (GiftItem) -> Unit) {
+    // the profile page pads its sides by 16dp; the grid wants 9dp
+    val bleed = 7.dp
+    Column(
+        modifier = Modifier.fillMaxWidth().layout { measurable, constraints ->
+            val extra = bleed.roundToPx()
+            val p = measurable.measure(
+                constraints.copy(minWidth = constraints.maxWidth + extra * 2, maxWidth = constraints.maxWidth + extra * 2)
+            )
+            layout(constraints.maxWidth, p.height) { p.place(-extra, 0) }
+        },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // the strip is 50dp tall; the glass pill inside it is about 36dp (strip padding 7dp), corners 18dp
+        Box(Modifier.height(50.dp), contentAlignment = Alignment.Center) {
+            GlassSurface(18.dp) {
+                // the selected tab: 28dp tall (4dp in from the pill edge), corners 14dp, the text colour at 15%
+                Box(Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Ui.ink.copy(alpha = 0.15f))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // tab text is 15sp bold; the gift pictures follow it like emoji
+                        Text("Gifts", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ui.ink)
+                        gifts.orEmpty().distinctBy { it.name }.take(3).forEach { g ->
+                            Spacer(Modifier.width(4.dp))
+                            GiftArt(g, 18.dp, loop = false)
+                        }
                     }
                 }
             }
+        }
+        Spacer(Modifier.height(4.dp))
+        when {
+            gifts == null -> {
+                // keeps the room of two rows while loading so the page does not jump
+                Box(Modifier.fillMaxWidth().height(114.dp * 2 + 8.dp))
+            }
+            gifts.isEmpty() -> {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(Modifier.size(120.dp), contentAlignment = Alignment.Center) { GiftGlyph(Ui.muted, 88.dp) }
+                    Spacer(Modifier.height(8.dp))
+                    Text("No gifts yet", fontSize = 17.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Gifts they receive will show up here", fontSize = 14.sp, color = Ui.muted, textAlign = TextAlign.Center)
+                }
+            }
             else -> {
-                val shown = if (expanded) gifts else gifts.take(GIFTS_PREVIEW)
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    shown.chunked(3).forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            row.forEach { g -> GiftTile(g, Modifier.weight(1f)) { onOpen(g) } }
-                            // an unfinished last row keeps the same tile size
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp + 3.5.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    gifts.chunked(3).forEach { row ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            row.forEach { g -> GiftTile(g, Ui.soft, Modifier.weight(1f)) { onOpen(g) } }
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
             }
         }
+        // room under the last row for the floating button (30 + 56dp in Telegram)
+        Spacer(Modifier.height(86.dp))
     }
 }
 
+/**
+ * The floating "Send a gift" button: a 38dp pill (16dp sides) on the same glass as the tab, 8dp around it. Place it 11dp above the bottom edge (Telegram's 60dp button strip, button centred).
+ */
 @Composable
-private fun GiftInfoRow(label: String, content: @Composable RowScope.() -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, fontSize = 14.sp, color = Ui.muted, modifier = Modifier.width(72.dp))
-        content()
+fun GiftSendPill(name: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    GlassSurface(22.dp, modifier) {
+        Box(Modifier.padding(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(Ui.ink)
+                    .clickable(onClick = onClick)
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GiftGlyph(Ui.onInk, 20.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (name.isBlank()) "Send a gift" else "Send a gift to $name",
+                    color = Ui.onInk,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        }
     }
 }
 
-/** The sheet that opens when a gift is tapped: picture, who sent it, when, and what it is worth. */
+/** A row of the gift table (measured from Telegram's TableView): 14sp text, padding 12.66 / 9.33 / 10.66 / 9.33dp. */
+@Composable
+private fun GiftTableRow(label: String, content: @Composable RowScope.() -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(
+            modifier = Modifier
+                .width(64.dp)
+                .fillMaxHeight()
+                .background(Ui.soft)
+                .padding(start = 12.66.dp, end = 4.dp, top = 9.33.dp, bottom = 9.33.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Ui.ink, maxLines = 1)
+        }
+        VerticalDivider(thickness = 0.66.dp, color = Ui.line)
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.66.dp, end = 10.66.dp, top = 9.33.dp, bottom = 9.33.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content
+        )
+    }
+}
+
+/**
+ * The sheet that opens when a gift is tapped: the picture (128dp), the name, then a bordered table
+ * with who sent it, when, and what it is worth. Table 14dp from each side, corners 10dp, hairline 0.66dp.
+ * Buttons are 48dp tall.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GiftDetailSheet(gift: GiftItem, onDismiss: () -> Unit, onSendOne: () -> Unit) {
@@ -548,13 +640,14 @@ fun GiftDetailSheet(gift: GiftItem, onDismiss: () -> Unit, onSendOne: () -> Unit
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 20.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp)
+                .padding(top = 8.dp, bottom = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            GiftArt(gift, 140.dp)
-            Spacer(Modifier.height(12.dp))
-            Text(gift.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            GiftArt(gift, 128.dp)
+            Spacer(Modifier.height(16.dp))
+            Text(gift.name, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = Ui.ink, textAlign = TextAlign.Center)
             val serial = gift.serial
             if (serial != null) {
                 val total = gift.totalSupply
@@ -565,45 +658,59 @@ fun GiftDetailSheet(gift: GiftItem, onDismiss: () -> Unit, onSendOne: () -> Unit
                     color = Ui.muted
                 )
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Ui.soft)
+                    .clip(RoundedCornerShape(10.dp))
+                    .border(0.66.dp, Ui.line, RoundedCornerShape(10.dp))
             ) {
-                GiftInfoRow("From") {
+                GiftTableRow("From") {
                     if (gift.fromId != null) {
                         GiftSender(gift, 24.dp)
                         Spacer(Modifier.width(10.dp))
                         Text(
                             gift.fromName ?: "Unknown",
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
+                            color = Ui.ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     } else {
-                        Text("Anonymous", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text("Anonymous", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Ui.ink)
                     }
                 }
-                HorizontalDivider(color = Ui.line)
-                GiftInfoRow("Date") { Text(whenText, fontSize = 15.sp) }
-                HorizontalDivider(color = Ui.line)
-                GiftInfoRow("Value") {
-                    GemGlyph(18.dp)
+                HorizontalDivider(thickness = 0.66.dp, color = Ui.line)
+                GiftTableRow("Date") { Text(whenText, fontSize = 14.sp, color = Ui.ink) }
+                HorizontalDivider(thickness = 0.66.dp, color = Ui.line)
+                GiftTableRow("Value") {
+                    GemGlyph(16.dp)
                     Spacer(Modifier.width(6.dp))
-                    Text(nf.format(gift.gems), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(nf.format(gift.gems), fontSize = 14.sp, color = Ui.ink)
                 }
                 val note = gift.message
                 if (!note.isNullOrBlank()) {
-                    HorizontalDivider(color = Ui.line)
-                    GiftInfoRow("Note") { Text(note, fontSize = 15.sp) }
+                    HorizontalDivider(thickness = 0.66.dp, color = Ui.line)
+                    GiftTableRow("Note") { Text(note, fontSize = 14.sp, color = Ui.ink) }
                 }
             }
-            Spacer(Modifier.height(18.dp))
-            GiftDarkButton("Send one too", onSendOne, Modifier.fillMaxWidth()) {
-                GiftGlyph(Ui.onInk, 22.dp)
+            Spacer(Modifier.height(16.dp))
+            GiftDarkButton("OK", onDismiss, Modifier.fillMaxWidth(), height = 48.dp)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Ui.soft)
+                    .clickable(onClick = onSendOne),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GiftGlyph(Ui.ink, 22.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Send one too", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ui.ink)
             }
         }
     }
