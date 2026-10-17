@@ -443,7 +443,12 @@ private fun CallScreen() {
         CallPhase.Connecting -> "Connecting…"
         CallPhase.Active -> {
             val s = CallManager.seconds
-            (s / 60).toString().padStart(2, '0') + ":" + (s % 60).toString().padStart(2, '0')
+            val t = (s / 60).toString().padStart(2, '0') + ":" + (s % 60).toString().padStart(2, '0')
+            when {
+                CallManager.reconnecting -> "Reconnecting…"
+                CallManager.weakSignal -> "$t · Weak connection"
+                else -> t
+            }
         }
         else -> ""
     }
