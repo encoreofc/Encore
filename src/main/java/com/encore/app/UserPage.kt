@@ -1,10 +1,16 @@
 package com.encore.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +48,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -198,6 +205,395 @@ private fun MenuRow(label: String, onClick: () -> Unit, color: Color = Ui.ink, i
     )
 }
 
+// ---------------------------------------------------------------------------
+// The tabs under the info card: Gifts (always) and Media / Files / Voice when the chat has them.
+// Sizes are Telegram's: strip 50dp (pill 36dp, corners 18dp, tab 28dp / corners 14dp, 15sp bold, 12dp tab
+// padding, 8dp between tabs), media grid 3 columns with 2dp gaps, file / voice rows 56dp with the text 72dp
+// from the card edge (name 16sp / title 15sp, second line 13sp), icon 40dp, voice button 44dp.
+// ---------------------------------------------------------------------------
+
+private const val TAB_GIFTS = "gifts"
+private const val TAB_MEDIA = "media"
+private const val TAB_FILES = "files"
+private const val TAB_VOICE = "voice"
+private const val PAGE = 60
+
+private fun tabTitle(t: String) = when (t) {
+    TAB_MEDIA -> "Media"
+    TAB_FILES -> "Files"
+    else -> "Voice"
+}
+
+/** Walks back through the chat (100 messages a request, at most 10 requests) and keeps what has a file attached. */
+private fun loadShared(cid: String): List<MsgItem> {
+    val out = ArrayList<MsgItem>()
+    var before: String? = null
+    var pages = 0
+    while (pages < 10) {
+        pages++
+        val q = "/v1/conversations/$cid/sync?limit=100" + (if (before != null) "&before=$before" else "")
+        val j = Api.call("GET", q)
+        val arr = j.getJSONArray("messages")
+        if (arr.length() == 0) break
+        val items = List(arr.length()) { parseItem(arr.getJSONObject(it)) }
+        out.addAll(items)
+        before = items.minByOrNull { it.msg.createdAt }?.msg?.id
+        if (!j.optBoolean("has_more") || before == null) break
+    }
+    return out
+        .filter { !it.msg.deleted && it.media != null && it.ttl == 0 }
+        .distinctBy { it.msg.id }
+        .sortedByDescending { it.msg.createdAt }
+}
+
+private fun copyText(ctx: Context, text: String, done: String) {
+    try {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("label", text))
+        // Android 13 and newer show their own "copied" note
+        if (Build.VERSION.SDK_INT < 33) Toast.makeText(ctx, done, Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+    }
+}
+
+private fun fileSizeText(b: Long): String = when {
+    b >= 1048576L -> String.format(java.util.Locale.US, "%.1f MB", b / 1048576.0)
+    b >= 1024L -> String.format(java.util.Locale.US, "%.1f KB", b / 1024.0)
+    else -> "$b B"
+}
+
+private fun clock(ms: Long): String {
+    val s = (ms / 1000).toInt()
+    return String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
+}
+
+@Composable
+private fun CopyGlyph(color: Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val w = size.width
+        val sw = w * 0.08f
+        drawRoundRect(
+            color,
+            topLeft = Offset(w * 0.32f, w * 0.1f),
+            size = Size(w * 0.56f, w * 0.62f),
+            cornerRadius = CornerRadius(w * 0.08f),
+            style = Stroke(width = sw)
+        )
+        drawRoundRect(
+            color,
+            topLeft = Offset(w * 0.12f, w * 0.28f),
+            size = Size(w * 0.56f, w * 0.62f),
+            cornerRadius = CornerRadius(w * 0.08f),
+            style = Stroke(width = sw)
+        )
+    }
+}
+
+@Composable
+private fun PlayGlyph(color: Color, boxSize: Dp, playing: Boolean = false) {
+    Canvas(Modifier.size(boxSize)) {
+        val w = size.width
+        val h = size.height
+        if (playing) {
+            drawRect(color, Offset(w * 0.26f, h * 0.2f), Size(w * 0.17f, h * 0.6f))
+            drawRect(color, Offset(w * 0.57f, h * 0.2f), Size(w * 0.17f, h * 0.6f))
+        } else {
+            val tri = Path().apply {
+                moveTo(w * 0.3f, h * 0.15f)
+                lineTo(w * 0.84f, h * 0.5f)
+                lineTo(w * 0.3f, h * 0.85f)
+                close()
+            }
+            drawPath(tri, color)
+        }
+    }
+}
+
+/** The pill with the tabs. Gifts comes first and keeps its little gift pictures. */
+@Composable
+private fun ProfileTabStrip(tabs: List<String>, selected: String, gifts: List<GiftItem>?, onSelect: (String) -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        GlassSurface(18.dp) {
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                tabs.forEach { t ->
+                    val on = t == selected
+                    val tint = if (on) Ui.ink else Ui.muted
+                    Row(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (on) Ui.ink.copy(alpha = 0.15f) else Color.Transparent)
+                            .clickable { onSelect(t) }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (t == TAB_GIFTS) {
+                            GiftsTabLabel(gifts, tint)
+                        } else {
+                            Text(tabTitle(t), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = tint)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaTile(cid: String, item: MsgItem, shape: RoundedCornerShape, onOpen: (MsgItem) -> Unit) {
+    val isVideo = item.msg.kind == "video"
+    val ctx = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(shape)
+            .background(if (isVideo) Color(0xFF1B1D21) else Ui.soft)
+            .clickable { onOpen(item) }
+    ) {
+        if (!isVideo) {
+            val url = remember(item.msg.id) { Uploads.url(cid, item.msg.id) }
+            val req = remember(url) {
+                ImageRequest.Builder(ctx)
+                    .data(url)
+                    .addHeader("Authorization", "Bearer ${Session.token}")
+                    .crossfade(true)
+                    .build()
+            }
+            AsyncImage(
+                model = req,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x66000000)),
+                contentAlignment = Alignment.Center
+            ) { PlayGlyph(Color.White, 18.dp) }
+            // duration badge: 17dp tall, corners 4dp, 5dp from the left, 3dp from the bottom
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 5.dp, bottom = 3.dp)
+                    .height(17.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0x66000000))
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlayGlyph(Color.White, 8.dp)
+                val d = item.media?.dur ?: 0L
+                if (d > 0) {
+                    Spacer(Modifier.width(2.dp))
+                    Text(durLabel(d), color = Color.White, fontSize = 12.sp, lineHeight = 14.sp)
+                }
+            }
+        }
+    }
+}
+
+/** 3 columns, square cells; each cell leaves 2dp on its right and bottom (and on the left for the first column). */
+@Composable
+private fun SharedMediaGrid(cid: String, items: List<MsgItem>, onOpen: (MsgItem) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        items.chunked(3).forEachIndexed { r, row ->
+            Row(Modifier.fillMaxWidth()) {
+                for (c in 0 until 3) {
+                    val item = row.getOrNull(c)
+                    if (item == null) {
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        val top = r == 0
+                        val shape = RoundedCornerShape(
+                            topStart = if (top && c == 0) 18.dp else 1.dp,
+                            topEnd = if (top && c == 2) 18.dp else 1.dp,
+                            bottomEnd = 1.dp,
+                            bottomStart = 1.dp
+                        )
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .padding(start = if (c == 0) 2.dp else 0.dp, end = 2.dp, bottom = 2.dp)
+                        ) { MediaTile(cid, item, shape, onOpen) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileBadge(name: String, modifier: Modifier = Modifier) {
+    val ext = name.substringAfterLast('.', "").lowercase().take(4)
+    val palette = listOf(Color(0xFFF2706A), Color(0xFF52A9EA), Color(0xFF5DBE7A), Color(0xFFF0A24E))
+    val c = palette[(ext.hashCode() and 0x7fffffff) % palette.size]
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(c),
+        contentAlignment = Alignment.Center
+    ) {
+        if (ext.isNotEmpty()) {
+            Text(ext, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+@Composable
+private fun RowDivider(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .padding(start = 72.dp)
+            .fillMaxWidth()
+            .height(Dp.Hairline)
+            .background(Ui.muted.copy(alpha = 0.2f))
+    )
+}
+
+/** Files: rows 56dp, icon 40dp (12dp in, 8dp down), name 16sp at 5dp, size and date 13sp at 30dp, both 72dp from the left. */
+@Composable
+private fun SharedFilesList(cid: String, items: List<MsgItem>) {
+    val ctx = LocalContext.current
+    val dateFmt = remember { java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.getDefault()) }
+    val timeFmt = remember { android.text.format.DateFormat.getTimeFormat(ctx) }
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Ui.soft)
+    ) {
+        items.forEachIndexed { i, item ->
+            val m = item.media
+            if (m != null) {
+                val at = java.util.Date(item.msg.createdAt)
+                val sub = fileSizeText(m.size) + ", " + dateFmt.format(at) + " at " + timeFmt.format(at)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clickable { Uploads.download(ctx, cid, item.msg.id, m.name) }
+                ) {
+                    FileBadge(m.name, Modifier.align(Alignment.CenterStart).padding(start = 12.dp))
+                    Text(
+                        m.name,
+                        color = Ui.ink,
+                        fontSize = 16.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 72.dp, end = 8.dp, top = 5.dp)
+                    )
+                    Text(
+                        sub,
+                        color = Ui.muted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 72.dp, end = 8.dp, top = 30.dp)
+                    )
+                    if (i < items.size - 1) RowDivider(Modifier.align(Alignment.BottomStart))
+                }
+            }
+        }
+    }
+}
+
+/** Voice: rows 56dp, round button 44dp (12dp in), title 15sp at 9dp, who and length 13sp at 29dp. */
+@Composable
+private fun SharedVoiceList(cid: String, items: List<MsgItem>, meId: String, peerName: String) {
+    val ctx = LocalContext.current
+    val dateFmt = remember { java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.getDefault()) }
+    val timeFmt = remember { android.text.format.DateFormat.getTimeFormat(ctx) }
+    val today = remember { dateFmt.format(java.util.Date()) }
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Ui.soft)
+    ) {
+        items.forEachIndexed { i, item ->
+            val m = item.media
+            if (m != null) {
+                val id = item.msg.id
+                val playing = VoicePlayer.playingId == id
+                val at = java.util.Date(item.msg.createdAt)
+                val day = dateFmt.format(at)
+                val title = (if (day == today) "" else "$day ") + "at " + timeFmt.format(at)
+                val who = if (item.msg.senderId == meId) "You" else peerName
+                val shownMs = if (playing) VoicePlayer.position.toLong() else m.dur
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clickable { VoicePlayer.toggle(ctx, cid, id, m.localUri) }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = 12.dp)
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Ui.ink),
+                        contentAlignment = Alignment.Center
+                    ) { PlayGlyph(Ui.onInk, 24.dp, playing) }
+                    Text(
+                        title,
+                        color = Ui.ink,
+                        fontSize = 15.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 72.dp, end = 8.dp, top = 9.dp)
+                    )
+                    Text(
+                        "$who \u2022 ${clock(shownMs)}",
+                        color = Ui.muted,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 72.dp, end = 8.dp, top = 29.dp)
+                    )
+                    if (i < items.size - 1) RowDivider(Modifier.align(Alignment.BottomStart))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShowMore(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Text("Show more", color = Ui.muted, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
+}
+
 /**
  * The round photo. 96dp like Telegram. With a story the photo is pulled in by 3.5dp (Telegram's story inset)
  * and a golden ring is drawn around it.
@@ -301,6 +697,31 @@ fun UserPageScreen(
     var contactSheet by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
+    // what the chat holds: null while loading; the tabs show only what is there
+    var shared by remember(conv.id) { mutableStateOf<List<MsgItem>?>(null) }
+    var tab by remember(conv.id) { mutableStateOf(TAB_GIFTS) }
+    var shown by remember(conv.id) { mutableStateOf(PAGE) }
+    var viewImage by remember { mutableStateOf<MsgItem?>(null) }
+    var viewVideo by remember { mutableStateOf<MsgItem?>(null) }
+    var bioMenu by remember { mutableStateOf(false) }
+    val mediaItems = remember(shared) { shared.orEmpty().filter { it.msg.kind == "image" || it.msg.kind == "video" } }
+    val fileItems = remember(shared) { shared.orEmpty().filter { it.msg.kind == "file" } }
+    val voiceItems = remember(shared) { shared.orEmpty().filter { it.msg.kind == "voice" } }
+    val tabs = buildList {
+        add(TAB_GIFTS)
+        if (mediaItems.isNotEmpty()) add(TAB_MEDIA)
+        if (fileItems.isNotEmpty()) add(TAB_FILES)
+        if (voiceItems.isNotEmpty()) add(TAB_VOICE)
+    }
+    val activeTab = if (tab in tabs) tab else TAB_GIFTS
+    val voiceIds by rememberUpdatedState(voiceItems.map { it.msg.id }.toSet())
+    // a voice message started here stops when the page is left
+    DisposableEffect(Unit) {
+        onDispose {
+            val pid = VoicePlayer.playingId
+            if (pid != null && pid in voiceIds) VoicePlayer.stop()
+        }
+    }
 
     LaunchedEffect(conv.id) {
         if (peer != null) {
@@ -334,6 +755,9 @@ fun UserPageScreen(
             runIo({ StoriesApi.userGroup(peer) }) { r -> r.onSuccess { group = it } }
             runIo({ GiftsApi.received(peer.id) }) { r ->
                 r.onSuccess { gifts = it }.onFailure { gifts = emptyList() }
+            }
+            runIo({ loadShared(conv.id) }) { r ->
+                r.onSuccess { shared = it }.onFailure { shared = emptyList() }
             }
         }
     }
@@ -448,9 +872,23 @@ fun UserPageScreen(
                 ) {
                     val b = bio
                     if (!b.isNullOrBlank()) {
-                        InfoRow(b, "Bio", 19.sp)
+                        // press and hold: a Copy button
+                        Box(Modifier.combinedClickable(onClick = {}, onLongClick = { bioMenu = true })) {
+                            InfoRow(b, "Bio", 19.sp)
+                            DropdownMenu(
+                                expanded = bioMenu,
+                                onDismissRequest = { bioMenu = false },
+                                containerColor = Ui.bg,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                MenuRow("Copy", { bioMenu = false; copyText(appCtx, b, "Bio copied") }) { CopyGlyph(Ui.ink) }
+                            }
+                        }
                     }
-                    InfoRow("@" + peer.username, "Username", 20.sp)
+                    // tap: the username is copied
+                    Box(Modifier.clickable { copyText(appCtx, "@" + peer.username, "Username copied") }) {
+                        InfoRow("@" + peer.username, "Username", 20.sp)
+                    }
                 }
                 Spacer(Modifier.height(14.5.dp))
 
@@ -483,9 +921,46 @@ fun UserPageScreen(
                 )
             }
 
-            // the gifts sit at the bottom of the profile like Telegram's tab; 6.5dp here puts the tiles 12dp from the edge
-            Box(Modifier.fillMaxWidth().padding(horizontal = 6.5.dp)) {
-                GiftsSection(gifts = gifts, onOpen = { openGift = it })
+            // the tabs sit at the bottom of the profile like Telegram's: Gifts always, Media / Files / Voice when the chat has them
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                val multi = tabs.size > 1
+                if (multi) {
+                    ProfileTabStrip(tabs, activeTab, gifts) {
+                        tab = it
+                        shown = PAGE
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                when (activeTab) {
+                    TAB_MEDIA -> {
+                        SharedMediaGrid(conv.id, mediaItems.take(shown)) {
+                            if (it.msg.kind == "video") viewVideo = it else viewImage = it
+                        }
+                        if (mediaItems.size > shown) ShowMore { shown += PAGE }
+                        Spacer(Modifier.height(86.dp))
+                    }
+                    TAB_FILES -> {
+                        SharedFilesList(conv.id, fileItems.take(shown))
+                        if (fileItems.size > shown) ShowMore { shown += PAGE }
+                        Spacer(Modifier.height(86.dp))
+                    }
+                    TAB_VOICE -> {
+                        SharedVoiceList(
+                            conv.id,
+                            voiceItems.take(shown),
+                            me.id,
+                            ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown")
+                        )
+                        if (voiceItems.size > shown) ShowMore { shown += PAGE }
+                        Spacer(Modifier.height(86.dp))
+                    }
+                    else -> {
+                        // 6.5dp here puts the gift tiles 12dp from the edge
+                        Box(Modifier.fillMaxWidth().padding(horizontal = 6.5.dp)) {
+                            GiftsSection(gifts = gifts, onOpen = { openGift = it }, showHeader = !multi)
+                        }
+                    }
+                }
             }
         }
 
@@ -633,6 +1108,9 @@ fun UserPageScreen(
             dismissButton = { TextButton(onClick = { confirmBlock = false }) { Text("Cancel") } }
         )
     }
+
+    viewImage?.let { ImageViewer(conv.id, it) { viewImage = null } }
+    viewVideo?.let { VideoPlayerDialog(conv.id, it) { viewVideo = null } }
 
     if (report && peer != null) {
         var reason by remember { mutableStateOf("") }
