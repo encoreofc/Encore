@@ -2,13 +2,12 @@ package com.encore.app
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +33,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONArray
@@ -230,42 +230,55 @@ private fun ContactButton(label: String, enabled: Boolean, onClick: () -> Unit, 
     }
 }
 
+/**
+ * One contact, 56dp tall, no line between rows (measured from Telegram's UserCell, call style).
+ * The avatar (44dp) starts [gutter] from the left edge; the letter of the group is drawn in that
+ * gutter on the group's first row: 22sp bold, centred in a 42dp box that starts 12dp from the edge.
+ * Name 15sp starts 14dp after the avatar, 10dp from the top; username 13sp sits 2dp under it; 28dp free on the right.
+ */
 @Composable
-private fun ContactRow(c: ContactEntry, onClick: () -> Unit) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(start = 11.dp, end = 15.dp, top = 9.dp, bottom = 9.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Avatar(c.id, c.name, 52.dp)
-            Spacer(Modifier.width(13.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        c.name,
-                        fontSize = fs(16f),
-                        fontWeight = FontWeight.Medium,
-                        color = Ui.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Badge(c.id, name = c.name)
+private fun ContactRow(c: ContactEntry, letter: String?, gutter: Dp, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(modifier = Modifier.width(gutter).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+            if (letter != null) {
+                Box(modifier = Modifier.padding(start = 12.dp).width(42.dp), contentAlignment = Alignment.Center) {
+                    Text(letter, fontSize = fs(22f), fontWeight = FontWeight.Bold, color = Ui.muted, maxLines = 1)
                 }
-                Spacer(Modifier.height(3.dp))
+            }
+        }
+        Box(modifier = Modifier.padding(top = 6.dp)) { Avatar(c.id, c.name, 44.dp) }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f).padding(top = 10.dp)) {
+            Row(modifier = Modifier.height(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    c.name,
+                    fontSize = fs(15f),
+                    fontWeight = FontWeight.Medium,
+                    color = Ui.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Badge(c.id, name = c.name)
+            }
+            Spacer(Modifier.height(2.dp))
+            Box(modifier = Modifier.height(20.dp), contentAlignment = Alignment.CenterStart) {
                 Text(
                     "@" + c.username,
                     color = Ui.muted,
-                    fontSize = fs(15f),
+                    fontSize = fs(13f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        HorizontalDivider(modifier = Modifier.padding(start = 72.dp), thickness = 0.5.dp, color = Ui.line)
+        Spacer(Modifier.width(28.dp))
     }
 }
 
@@ -279,10 +292,9 @@ private fun letterOf(name: String): String {
 // ---------------------------------------------------------------------------
 
 /**
- * Full-screen contacts list: people grouped under sticky letters, a search that
+ * Full-screen contacts list: people grouped by letter (the letter sits left of the first person), a search that
  * matches the name you gave, their own name and their username, and a button to add someone.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContactsScreen(
     onBack: () -> Unit,
@@ -310,6 +322,8 @@ fun ContactsScreen(
     }
     val groups = shown.groupBy { letterOf(it.name) }
     val letters = groups.keys.sortedWith(compareBy<String> { if (it == "#") 1 else 0 }.thenBy { it })
+    // letters take the left gutter; while searching there are none, so rows start 14dp from the edge
+    val gutter = if (searching) 14.dp else 65.dp
 
     Box(
         modifier = Modifier
@@ -407,24 +421,22 @@ fun ContactsScreen(
                 ) {
                     if (!searching) {
                         item(key = "new") {
-                            Column {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(onClick = onAdd)
-                                        .padding(start = 11.dp, end = 15.dp, top = 9.dp, bottom = 9.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .clickable(onClick = onAdd),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Spacer(Modifier.width(gutter))
+                                Box(
+                                    modifier = Modifier.size(44.dp).clip(CircleShape).background(ContactGold),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier.size(52.dp).clip(CircleShape).background(ContactGold),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = ContactOnGold, modifier = Modifier.size(26.dp))
-                                    }
-                                    Spacer(Modifier.width(13.dp))
-                                    Text("New contact", fontSize = fs(16f), fontWeight = FontWeight.Medium, color = Ui.ink)
+                                    Icon(Icons.Default.Add, contentDescription = null, tint = ContactOnGold, modifier = Modifier.size(24.dp))
                                 }
-                                HorizontalDivider(modifier = Modifier.padding(start = 72.dp), thickness = 0.5.dp, color = Ui.line)
+                                Spacer(Modifier.width(14.dp))
+                                Text("New contact", fontSize = fs(15f), fontWeight = FontWeight.Medium, color = Ui.ink)
                             }
                         }
                     }
@@ -439,20 +451,9 @@ fun ContactsScreen(
                         }
                     }
                     letters.forEach { letter ->
-                        stickyHeader(key = "h_$letter") {
-                            Text(
-                                letter,
-                                fontSize = fs(14f),
-                                fontWeight = FontWeight.SemiBold,
-                                color = Ui.muted,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Ui.bg)
-                                    .padding(start = 18.dp, top = 8.dp, bottom = 4.dp)
-                            )
-                        }
-                        items(groups[letter].orEmpty(), key = { it.id }) { c ->
-                            ContactRow(c) { onOpen(c) }
+                        val people = groups[letter].orEmpty()
+                        itemsIndexed(people, key = { _, c -> c.id }) { i, c ->
+                            ContactRow(c, if (!searching && i == 0) letter else null, gutter) { onOpen(c) }
                         }
                     }
                 }
