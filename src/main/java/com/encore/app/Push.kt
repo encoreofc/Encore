@@ -45,7 +45,7 @@ class PushService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val d = message.data
-        when (d[\"type\"]) {
+        when (d["type"]) {
             "message" -> {
                 // pull the new message into the local database right away, even if the app is closed
                 Sync.kick()
