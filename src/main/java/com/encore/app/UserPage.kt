@@ -224,7 +224,9 @@ fun UserPageScreen(
     onBack: () -> Unit,
     onStories: (List<StoryGroup>, Int, Int) -> Unit,
     onSearch: () -> Unit,
-    onMedia: () -> Unit
+    onMedia: () -> Unit,
+    // opens the send-gift flow for this person; wire it when that screen exists
+    onSendGift: () -> Unit = {}
 ) {
     val peer = conv.peer
     // what was last known is used right away, so the page does not fill in piece by piece
@@ -243,6 +245,11 @@ fun UserPageScreen(
     var avatarBox by remember { mutableStateOf<Rect?>(null) }
     val soon = remember { SoonState() }
     val appCtx = LocalContext.current.applicationContext
+    // gifts: null while loading, empty when the person has none
+    var gifts by remember(conv.id) { mutableStateOf<List<GiftItem>?>(null) }
+    var giftsExpanded by remember(conv.id) { mutableStateOf(false) }
+    var openGift by remember { mutableStateOf<GiftItem?>(null) }
+    val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
 
     // never leave the page waiting: after a short moment show whatever is known
     LaunchedEffect(conv.id) {
@@ -283,6 +290,9 @@ fun UserPageScreen(
                 }
             }
             runIo({ StoriesApi.userGroup(peer) }) { r -> r.onSuccess { group = it } }
+            runIo({ GiftsApi.received(peer.id) }) { r ->
+                r.onSuccess { gifts = it }.onFailure { gifts = emptyList() }
+            }
         }
     }
 
@@ -406,6 +416,17 @@ fun UserPageScreen(
                         Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(20.dp))
                     }
                 }
+
+                Spacer(Modifier.height(28.dp))
+                // gifts sit right under the actions so they are easy to see
+                GiftsSection(
+                    gifts = gifts,
+                    peerName = giftName,
+                    expanded = giftsExpanded,
+                    onToggleExpanded = { giftsExpanded = !giftsExpanded },
+                    onOpen = { openGift = it },
+                    onSend = onSendGift
+                )
 
                 Spacer(Modifier.height(28.dp))
                 Row(
@@ -551,6 +572,10 @@ fun UserPageScreen(
                 Spacer(Modifier.height(24.dp))
                 }
             }
+            // always one tap away; hidden for someone you have blocked
+            if (peer != null && !blocked) {
+                SendGiftBar(giftName.ifBlank { "them" }, onSendGift)
+            }
         }
         // the close button floats over the photo, top right
         IconButton(
@@ -568,6 +593,18 @@ fun UserPageScreen(
         if (shownUrl != null && peer != null) {
             ProfilePhotoViewer(peer.id, peer.username, peer.displayName, shownUrl, avatarBox) { photoUrl = null }
         }
+    }
+
+    val shownGift = openGift
+    if (shownGift != null) {
+        GiftDetailSheet(
+            gift = shownGift,
+            onDismiss = { openGift = null },
+            onSendOne = {
+                openGift = null
+                onSendGift()
+            }
+        )
     }
 
     if (confirmBlock && peer != null) {
