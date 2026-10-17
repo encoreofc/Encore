@@ -390,12 +390,12 @@ private fun GiftTile(g: GiftItem, modifier: Modifier, onClick: () -> Unit) {
             .background(Ui.soft)
             .clickable(onClick = onClick)
     ) {
-        Box(Modifier.align(Alignment.Center)) { GiftArt(g, 52.dp, loop = false) }
+        Box(Modifier.align(Alignment.Center)) { GiftArt(g, 72.dp, loop = false) }
         Box(
             Modifier
                 .align(Alignment.TopStart)
                 .padding(8.dp)
-        ) { GiftSender(g, 22.dp) }
+        ) { GiftSender(g, 20.dp) }
         val serial = g.serial
         if (serial != null) {
             Box(
@@ -644,7 +644,7 @@ private fun ShopTile(t: GiftType, modifier: Modifier, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(Modifier.alpha(if (t.soldOut) 0.4f else 1f)) {
-            GiftArtView(t.artUrl, t.artKind, t.name, 56.dp, loop = false)
+            GiftArtView(t.artUrl, t.artKind, t.name, 72.dp, loop = false)
         }
         Spacer(Modifier.height(6.dp))
         Text(t.name, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
