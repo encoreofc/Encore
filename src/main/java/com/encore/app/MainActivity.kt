@@ -138,7 +138,6 @@ class MainActivity : ComponentActivity() {
                                 askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                             Push.register()
-                            CallSetup.check(ctx)
                             Sync.start()
                         }
                     }
