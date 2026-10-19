@@ -32,6 +32,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -56,15 +57,8 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
 // ---------------------------------------------------------------------------
-// Telegram's profile header, measured from ProfileActivity / ProfileActionsView
-// (screen 360dp wide in the reference screenshot):
-//   avatar 96dp, top = status bar + 56 (action bar) - 21 = status bar + 35dp
-//   name 17.5dp * 1.12 = 19.6sp bold, centre 28dp under the avatar
-//   action tiles: 54dp tall, 14dp from the screen edge, 7dp apart, corners 16dp,
-//                 icon 24dp (7dp from the top), label 11sp bold, tile top 85dp under the avatar
-//   info card: 12dp from the edge, corners 16dp, rows padded 18 / 10dp,
-//              value 16sp, label 13sp, 5dp between them
-//   gifts grid: tiles 12dp from the edge (GiftsSection adds 12.5dp - 7dp, so 6.5dp is given to it)
+// Encore profile: every person has their own colour (the "aura"), taken from their photo.
+// It glows behind the avatar and shines through the glass panels. One rule for the whole app.
 // ---------------------------------------------------------------------------
 
 private val StoryGold = listOf(
@@ -156,20 +150,19 @@ private fun MuteGlyph(muted: Boolean) {
     }
 }
 
-/** One action under the name: 54dp tall, icon 24dp starting 6.9dp from the top, label 11sp bold (top at 33.6dp). */
+/** One action under the name: a glass tile, 64dp tall. */
 @Composable
 private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
     Column(
         modifier = modifier
-            .height(54.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Ui.soft)
+            .height(64.dp)
+            .glassPanel(RoundedCornerShape(24.dp))
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(6.9.dp))
+        Spacer(Modifier.height(10.dp))
         Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
-        Spacer(Modifier.height(2.7.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             label,
             color = Ui.ink,
@@ -207,7 +200,7 @@ private fun MenuRow(label: String, onClick: () -> Unit, color: Color = Ui.ink, i
 
 // ---------------------------------------------------------------------------
 // The tabs under the info card: Gifts (always) and Media / Files / Voice when the chat has them.
-// Sizes are Telegram's: strip 50dp (pill 36dp, corners 18dp, tab 28dp / corners 14dp, 15sp bold, 12dp tab
+// Sizes: strip 50dp (pill 36dp, corners 18dp, tab 28dp / corners 14dp, 15sp bold, 12dp tab
 // padding, 8dp between tabs), media grid 3 columns with 2dp gaps, file / voice rows 56dp with the text 72dp
 // from the card edge (name 16sp / title 15sp, second line 13sp), icon 40dp, voice button 44dp.
 // ---------------------------------------------------------------------------
@@ -477,8 +470,7 @@ private fun SharedFilesList(cid: String, items: List<MsgItem>) {
         modifier = Modifier
             .padding(horizontal = 12.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Ui.soft)
+            .glassPanel(RoundedCornerShape(24.dp))
     ) {
         items.forEachIndexed { i, item ->
             val m = item.media
@@ -529,8 +521,7 @@ private fun SharedVoiceList(cid: String, items: List<MsgItem>, meId: String, pee
         modifier = Modifier
             .padding(horizontal = 12.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Ui.soft)
+            .glassPanel(RoundedCornerShape(24.dp))
     ) {
         items.forEachIndexed { i, item ->
             val m = item.media
@@ -595,8 +586,7 @@ private fun ShowMore(onClick: () -> Unit) {
 }
 
 /**
- * The round photo. 96dp like Telegram. With a story the photo is pulled in by 3.5dp (Telegram's story inset)
- * and a golden ring is drawn around it.
+ * The round photo, 112dp. With a story the photo is pulled in by 3.5dp and a golden ring is drawn around it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -610,10 +600,10 @@ private fun HeroAvatar(
     onBounds: (Rect) -> Unit
 ) {
     val inset = if (hasStory) 3.5.dp else 0.dp
-    val photo = 96.dp - inset * 2
+    val photo = 112.dp - inset * 2
     Box(
         modifier = Modifier
-            .size(96.dp)
+            .size(112.dp)
             .onGloballyPositioned { onBounds(it.boundsInRoot()) }
             .clip(CircleShape)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
@@ -789,6 +779,8 @@ fun UserPageScreen(
             .fillMaxSize()
             .background(Ui.bg)
     ) {
+        val aura by rememberAura(peer?.id ?: conv.id, peer?.let { Avatars.url(it.id) })
+        AuraBackground(aura, Modifier.fillMaxSize())
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -799,12 +791,24 @@ fun UserPageScreen(
             val avatarNow = peer?.let { Avatars.url(it.id) }
             val story = group
 
-            // avatar: 35dp under the status bar (56dp action bar - 21dp)
+            // avatar, with the person's colour glowing behind it
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 35.dp),
+                    .padding(top = 40.dp)
+                    .drawBehind {
+                        val r = 170.dp.toPx()
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                listOf(aura.copy(alpha = 0.65f), Color.Transparent),
+                                center = center,
+                                radius = r
+                            ),
+                            radius = r,
+                            center = center
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 HeroAvatar(
@@ -821,8 +825,8 @@ fun UserPageScreen(
                 )
             }
 
-            // name: centre 28dp under the avatar (top 16dp, line 24dp), 19.6sp bold
-            Spacer(Modifier.height(16.dp))
+            // name
+            Spacer(Modifier.height(18.dp))
             Row(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -830,23 +834,24 @@ fun UserPageScreen(
                 Text(
                     ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
                     color = Ui.ink,
-                    fontSize = 19.6.sp,
-                    lineHeight = 24.sp,
+                    fontSize = 26.sp,
+                    lineHeight = 32.sp,
+                    letterSpacing = (-0.4).sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                Badge(peer?.id, 20.sp, name = peer?.displayName)
+                Badge(peer?.id, 24.sp, name = peer?.displayName)
             }
 
-            // tiles start 85dp under the avatar; the row keeps Telegram's own 8dp above the tiles
-            Spacer(Modifier.height(37.dp))
+            // glass tiles
+            Spacer(Modifier.height(26.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 14.dp, end = 14.dp, top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ActionTile(if (muted) "Unmute" else "Mute", { toggleMute() }, Modifier.weight(1f)) { MuteGlyph(muted) }
                 ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
@@ -867,8 +872,7 @@ fun UserPageScreen(
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Ui.soft)
+                        .glassPanel(RoundedCornerShape(24.dp))
                 ) {
                     val b = bio
                     if (!b.isNullOrBlank()) {
@@ -898,8 +902,7 @@ fun UserPageScreen(
                             .padding(horizontal = 12.dp)
                             .fillMaxWidth()
                             .height(50.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Ui.soft)
+                            .glassPanel(RoundedCornerShape(24.dp))
                             .clickable { contactSheet = true }
                             .padding(start = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -921,7 +924,7 @@ fun UserPageScreen(
                 )
             }
 
-            // the tabs sit at the bottom of the profile like Telegram's: Gifts always, Media / Files / Voice when the chat has them
+            // the tabs sit at the bottom of the profile of the profile: Gifts always, Media / Files / Voice when the chat has them
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 val multi = tabs.size > 1
                 if (multi) {
