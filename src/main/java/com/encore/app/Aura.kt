@@ -43,7 +43,7 @@ fun auraSeed(id: String): Color {
     var h = 0
     for (c in id) h = h * 31 + c.code
     val hue = (((h % 360) + 360) % 360).toFloat()
-    return Color.hsv(hue, 0.62f, 0.95f)
+    return Color.hsv(220f, 0.12f, 0.62f)
 }
 
 /** The most colourful hue in the photo, or null when the photo is grey. */
@@ -68,8 +68,8 @@ private fun dominantColor(bmp: Bitmap): Color? {
     }
     if (total < 8.0) return null
     val hue = ((Math.toDegrees(atan2(sy, sx)) + 360.0) % 360.0).toFloat()
-    val saturation = (sat / total).toFloat().coerceIn(0.5f, 0.9f)
-    return Color.hsv(hue, saturation, 0.95f)
+    val saturation = (sat / total).toFloat().coerceIn(0.25f, 0.50f)
+    return Color.hsv(hue, saturation, 0.80f)
 }
 
 private fun hueShift(c: Color, degrees: Float): Color {
@@ -103,44 +103,22 @@ fun rememberAura(id: String, url: String?): State<Color> {
     return animateColorAsState(target, tween(900), label = "aura")
 }
 
-/** Soft slow-moving light in the person's colour. Put it behind the glass. */
+/** One quiet wash of the person's colour from the top, fading to the normal background. No motion. */
 @Composable
 fun AuraBackground(color: Color, modifier: Modifier = Modifier) {
     val dark = LocalPalette.current.dark
-    val t by rememberInfiniteTransition(label = "aura-move").animateFloat(
-        initialValue = 0f,
-        targetValue = (2.0 * Math.PI).toFloat(),
-        animationSpec = infiniteRepeatable(tween(26000, easing = LinearEasing)),
-        label = "aura-t"
-    )
-    val partner = hueShift(color, 45f)
     Box(
         modifier
             .background(Ui.bg)
             .drawBehind {
                 val w = size.width
                 val h = size.height
-                val strong = if (dark) 0.55f else 0.40f
-                val soft = if (dark) 0.34f else 0.24f
+                val a = if (dark) 0.20f else 0.13f
                 drawRect(
                     Brush.radialGradient(
-                        listOf(color.copy(alpha = strong), Color.Transparent),
-                        center = Offset(w * (0.5f + 0.12f * sin(t)), h * 0.12f),
-                        radius = w * 1.05f
-                    )
-                )
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(partner.copy(alpha = soft), Color.Transparent),
-                        center = Offset(w * (0.92f + 0.08f * cos(t)), h * 0.42f),
-                        radius = w * 0.85f
-                    )
-                )
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(color.copy(alpha = soft), Color.Transparent),
-                        center = Offset(w * (0.05f + 0.08f * sin(t + 2f)), h * 0.72f),
-                        radius = w * 0.9f
+                        listOf(color.copy(alpha = a), Color.Transparent),
+                        center = Offset(w * 0.5f, h * 0.06f),
+                        radius = w * 1.15f
                     )
                 )
             }
