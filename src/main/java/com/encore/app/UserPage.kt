@@ -710,7 +710,6 @@ fun UserPageScreen(
     var coverKey by remember(conv.id) { mutableStateOf(peer?.let { coverKeyCache[it.id] }) }
     var allMedia by remember(conv.id) { mutableStateOf(false) }
     var allCount by remember(conv.id) { mutableStateOf<Int?>(null) }
-    var videoAvatar by remember { mutableStateOf<String?>(null) }
     var bioMenu by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
 
@@ -831,15 +830,9 @@ fun UserPageScreen(
                     hasStory = story != null,
                     onClick = {
                         if (story != null) onStories(listOf(story), 0, -1)
-                        else if (avatarNow != null) {
-                            if (peer != null && Avatars.isVideo(peer.id)) videoAvatar = avatarNow else photoUrl = avatarNow
-                        }
+                        else if (avatarNow != null) photoUrl = avatarNow
                     },
-                    onLongClick = {
-                        if (avatarNow != null) {
-                            if (peer != null && Avatars.isVideo(peer.id)) videoAvatar = avatarNow else photoUrl = avatarNow
-                        }
-                    },
+                    onLongClick = { if (avatarNow != null) photoUrl = avatarNow },
                     onBounds = { avatarBox = it }
                 )
             }
@@ -1064,7 +1057,6 @@ fun UserPageScreen(
         }
     }
 
-    videoAvatar?.let { AvatarVideoDialog(it) { videoAvatar = null } }
 
     val shownGift = openGift
     if (shownGift != null) {
