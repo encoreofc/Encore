@@ -225,42 +225,83 @@ internal fun rememberCoverPicker(
 // Playing
 // ---------------------------------------------------------------------------
 
-private fun fillCrop(v: TextureView, vw: Int, vh: Int) {
+private class PlayerHolder {
+    var mp: MediaPlayer? = null
+    var vw = 0
+    var vh = 0
+}
+
+private fun applyVideoMatrix(v: TextureView, vw: Int, vh: Int, crop: Boolean) {
     val w = v.width.toFloat()
     val h = v.height.toFloat()
     if (vw <= 0 || vh <= 0 || w <= 0f || h <= 0f) return
-    // a TextureView stretches the video to its box; this puts the true shape back and crops the overflow
-    val videoAspect = vw.toFloat() / vh
-    val viewAspect = w / h
-    val sx = if (videoAspect > viewAspect) videoAspect / viewAspect else 1f
-    val sy = if (videoAspect > viewAspect) 1f else viewAspect / videoAspect
+    // a TextureView stretches the video to its box; this puts the true shape back,
+    // then either crops the overflow (crop) or leaves bars around it (fit)
+    val va = vw.toFloat() / vh
+    val ra = w / h
+    val wide = va > ra
+    val sx = if (crop) (if (wide) va / ra else 1f) else (if (wide) 1f else va / ra)
+    val sy = if (crop) (if (wide) 1f else ra / va) else (if (wide) ra / va else 1f)
     val m = Matrix()
     m.setScale(sx, sy, w / 2f, h / 2f)
     v.setTransform(m)
 }
 
-/** A muted video that loops forever and fills its box (crop). Clip it with the modifier for a round avatar. */
+/**
+ * A video that loops forever. Default: muted and filling its box (crop), for the round avatar (clip it with the modifier).
+ * muted = false and crop = false is the viewer: with sound, the whole picture visible. active = false pauses it.
+ */
 @Composable
-internal fun LoopingVideo(url: String, modifier: Modifier = Modifier) {
+internal fun LoopingVideo(
+    url: String,
+    modifier: Modifier = Modifier,
+    muted: Boolean = true,
+    crop: Boolean = true,
+    active: Boolean = true,
+    onReady: () -> Unit = {}
+) {
     var ready by remember(url) { mutableStateOf(false) }
+    val activeNow by rememberUpdatedState(active)
+    val readyCb by rememberUpdatedState(onReady)
+    val holder = remember(url) { PlayerHolder() }
+
+    LaunchedEffect(active, ready) {
+        val p = holder.mp
+        if (ready && p != null) {
+            try {
+                if (active) {
+                    if (!p.isPlaying) p.start()
+                } else if (p.isPlaying) {
+                    p.pause()
+                }
+            } catch (e: Exception) {
+            }
+        }
+    }
+
     Box(modifier) {
         AndroidView(
             factory = { c ->
                 TextureView(c).apply {
-                    var mp: MediaPlayer? = null
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
                             val p = MediaPlayer()
-                            mp = p
+                            holder.mp = p
                             try {
                                 p.setDataSource(c, Uri.parse(url), mapOf("Authorization" to "Bearer ${Session.token}"))
                                 p.setSurface(Surface(st))
                                 p.isLooping = true
-                                p.setVolume(0f, 0f)
-                                p.setOnVideoSizeChangedListener { _, vw, vh -> fillCrop(this@apply, vw, vh) }
+                                val vol = if (muted) 0f else 1f
+                                p.setVolume(vol, vol)
+                                p.setOnVideoSizeChangedListener { _, vw, vh ->
+                                    holder.vw = vw
+                                    holder.vh = vh
+                                    applyVideoMatrix(this@apply, vw, vh, crop)
+                                }
                                 p.setOnPreparedListener {
-                                    it.start()
+                                    if (activeNow) it.start()
                                     ready = true
+                                    readyCb()
                                 }
                                 p.setOnErrorListener { _, _, _ -> true }
                                 p.prepareAsync()
@@ -268,14 +309,16 @@ internal fun LoopingVideo(url: String, modifier: Modifier = Modifier) {
                             }
                         }
 
-                        override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                        override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                            applyVideoMatrix(this@apply, holder.vw, holder.vh, crop)
+                        }
 
                         override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                             try {
-                                mp?.release()
+                                holder.mp?.release()
                             } catch (e: Exception) {
                             }
-                            mp = null
+                            holder.mp = null
                             return true
                         }
 
@@ -283,51 +326,10 @@ internal fun LoopingVideo(url: String, modifier: Modifier = Modifier) {
                     }
                 }
             },
-            // hidden until the first frame is ready, so the letters underneath show meanwhile
+            // hidden until the first frame is ready, so whatever is underneath shows meanwhile
             modifier = Modifier
                 .fillMaxSize()
                 .alpha(if (ready) 1f else 0f)
         )
-    }
-}
-
-/** Full screen look at someone's profile video, with sound, looping. Tap anywhere or the arrow to close. */
-@Composable
-internal fun AvatarVideoDialog(url: String, onClose: () -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .clickable(onClick = onClose)
-        ) {
-            AndroidView(
-                factory = { c ->
-                    VideoView(c).apply {
-                        setVideoURI(Uri.parse(url), mapOf("Authorization" to "Bearer ${Session.token}"))
-                        setOnPreparedListener {
-                            it.isLooping = true
-                            it.start()
-                        }
-                        setOnErrorListener { _, _, _ ->
-                            Toast.makeText(c, "Can't play this video", Toast.LENGTH_SHORT).show()
-                            true
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .align(Alignment.Center)
-            )
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(4.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-            }
-        }
     }
 }
