@@ -22,6 +22,9 @@ import java.util.concurrent.TimeUnit
 
 const val API_BASE = "https://encore-api.jahidhasanofficial397.workers.dev"
 
+/** the profile background picture of a person */
+fun coverUrl(uid: String, key: String) = "$API_BASE/v1/cover/$uid?v=$key"
+
 class ApiException(val code: String, message: String) : Exception(message)
 
 data class User(val id: String, val username: String, val displayName: String)
@@ -55,7 +58,13 @@ data class Msg(
     val deleted: Boolean,
     val clientId: String?
 )
-data class ProfileInfo(val user: User, val bio: String?, val avatarKey: String?, val blocked: Boolean = false)
+data class ProfileInfo(
+    val user: User,
+    val bio: String?,
+    val avatarKey: String?,
+    val blocked: Boolean = false,
+    val coverKey: String? = null
+)
 data class Member(val id: String, val username: String, val displayName: String, val role: String)
 
 private fun JSONObject.s(key: String): String? = if (isNull(key)) null else getString(key)
@@ -65,6 +74,9 @@ object Avatars {
     private val main = Handler(Looper.getMainLooper())
 
     fun url(seed: String): String? = map[seed]
+
+    /** true when the picture in use is a profile video (its key starts with w) */
+    fun isVideo(seed: String): Boolean = map[seed]?.substringAfter("?v=", "")?.startsWith("w") == true
 
     fun put(seed: String, kind: String, key: String?) {
         main.post {
@@ -109,11 +121,15 @@ object Api {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
+    private val uploadClient = client.newBuilder()
+        .writeTimeout(180, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .build()
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    private fun execute(req: Request): JSONObject {
+    private fun execute(req: Request, c: OkHttpClient = client): JSONObject {
         val result: JSONObject = try {
-            client.newCall(req).execute().use { r ->
+            c.newCall(req).execute().use { r ->
                 val text = r.body?.string() ?: ""
                 val j = try {
                     JSONObject(text)
@@ -154,7 +170,7 @@ object Api {
             .header("Authorization", "Bearer ${Session.token}")
             .post(bytes.toRequestBody(type.toMediaType()))
             .build()
-        return execute(req)
+        return execute(req, uploadClient)
     }
 
     private fun user(o: JSONObject) =
@@ -247,7 +263,7 @@ object Api {
     private fun profileOf(u: JSONObject): ProfileInfo {
         val key = u.s("avatar_key")
         Avatars.put(u.getString("id"), "u", key)
-        return ProfileInfo(user(u), u.s("bio"), key, u.optBoolean("blocked"))
+        return ProfileInfo(user(u), u.s("bio"), key, u.optBoolean("blocked"), u.s("cover_key"))
     }
 
     fun me(): ProfileInfo = profileOf(call("GET", "/v1/me").getJSONObject("user"))
@@ -257,6 +273,17 @@ object Api {
 
     fun setAvatar(bytes: ByteArray, type: String): ProfileInfo =
         profileOf(postBytes("/v1/me/avatar", bytes, type).getJSONObject("user"))
+
+    /** picture, GIF or video (video needs its length in milliseconds, 20 seconds at most) */
+    fun setAvatarMedia(bytes: ByteArray, type: String, durMs: Long): ProfileInfo {
+        val path = if (type.startsWith("video/")) "/v1/me/avatar?dur=$durMs" else "/v1/me/avatar"
+        return profileOf(postBytes(path, bytes, type).getJSONObject("user"))
+    }
+
+    fun setCover(bytes: ByteArray, type: String): ProfileInfo =
+        profileOf(postBytes("/v1/me/cover", bytes, type).getJSONObject("user"))
+
+    fun removeCover(): ProfileInfo = profileOf(call("DELETE", "/v1/me/cover").getJSONObject("user"))
 
     fun changePassword(old: String, new: String) {
         call("POST", "/v1/auth/password", JSONObject().put("old_password", old).put("new_password", new))
