@@ -5,6 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -217,27 +223,34 @@ private fun tabTitle(t: String) = when (t) {
     else -> "Voice"
 }
 
-/** Walks back through the chat (100 messages a request, at most 10 requests) and keeps what has a file attached. */
-private fun loadShared(cid: String): List<MsgItem> {
-    val out = ArrayList<MsgItem>()
-    var before: String? = null
-    var pages = 0
-    while (pages < 10) {
-        pages++
-        val q = "/v1/conversations/$cid/sync?limit=100" + (if (before != null) "&before=$before" else "")
-        val j = Api.call("GET", q)
-        val arr = j.getJSONArray("messages")
-        if (arr.length() == 0) break
-        val items = List(arr.length()) { parseItem(arr.getJSONObject(it)) }
-        out.addAll(items)
-        before = items.minByOrNull { it.msg.createdAt }?.msg?.id
-        if (!j.optBoolean("has_more") || before == null) break
-    }
-    return out
-        .filter { !it.msg.deleted && it.media != null && it.ttl == 0 }
-        .distinctBy { it.msg.id }
-        .sortedByDescending { it.msg.createdAt }
+private class SharedPage(
+    val items: List<MsgItem>,
+    val cursor: String?,
+    val counts: Map<String, Int>,
+    val hasMore: Boolean
+)
+
+/** One page of the chat's media / files / voice from the server (newest first); [before] is the oldest id already shown. */
+private fun fetchShared(cid: String, kind: String, before: String?, limit: Int = PAGE): SharedPage {
+    val q = "/v1/conversations/$cid/shared?kind=$kind&limit=$limit" + (if (before != null) "&before=$before" else "")
+    val j = Api.call("GET", q)
+    val arr = j.getJSONArray("messages")
+    val raw = List(arr.length()) { parseItem(arr.getJSONObject(it)) }
+    val c = j.optJSONObject("counts")
+    return SharedPage(
+        items = raw.filter { !it.msg.deleted && it.media != null && it.ttl == 0 },
+        cursor = raw.lastOrNull()?.msg?.id,
+        counts = mapOf(
+            TAB_MEDIA to (c?.optInt("media") ?: 0),
+            TAB_FILES to (c?.optInt("files") ?: 0),
+            TAB_VOICE to (c?.optInt("voice") ?: 0)
+        ),
+        hasMore = j.optBoolean("has_more")
+    )
 }
+
+// the last known background picture of each person, so a page does not jump when it opens again
+private val coverKeyCache = HashMap<String, String?>()
 
 private fun copyText(ctx: Context, text: String, done: String) {
     try {
@@ -302,9 +315,9 @@ private fun PlayGlyph(color: Color, boxSize: Dp, playing: Boolean = false) {
     }
 }
 
-/** The pill with the tabs. Gifts comes first and keeps its little gift pictures. */
+/** The pill with the three tabs of the All Media page, each with how many it holds. */
 @Composable
-private fun ProfileTabStrip(tabs: List<String>, selected: String, gifts: List<GiftItem>?, onSelect: (String) -> Unit) {
+private fun ProfileTabStrip(tabs: List<String>, selected: String, counts: Map<String, Int>, onSelect: (String) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -322,6 +335,7 @@ private fun ProfileTabStrip(tabs: List<String>, selected: String, gifts: List<Gi
                 tabs.forEach { t ->
                     val on = t == selected
                     val tint = if (on) Ui.ink else Ui.muted
+                    val n = counts[t] ?: 0
                     Row(
                         modifier = Modifier
                             .height(28.dp)
@@ -331,11 +345,12 @@ private fun ProfileTabStrip(tabs: List<String>, selected: String, gifts: List<Gi
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (t == TAB_GIFTS) {
-                            GiftsTabLabel(gifts, tint)
-                        } else {
-                            Text(tabTitle(t), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = tint)
-                        }
+                        Text(
+                            tabTitle(t) + if (n > 0) " $n" else "",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tint
+                        )
                     }
                 }
             }
@@ -594,6 +609,7 @@ private fun HeroAvatar(
     id: String,
     name: String,
     url: String?,
+    isVideo: Boolean,
     hasStory: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -617,7 +633,10 @@ private fun HeroAvatar(
         ) {
             // the letters show until the photo is there, or when there is no photo
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Avatar(id, name, photo) }
-            if (url != null) {
+            if (url != null && isVideo) {
+                // a profile video: muted, looping, round
+                LoopingVideo(url, Modifier.fillMaxSize())
+            } else if (url != null) {
                 val ctx = LocalContext.current
                 val req = remember(url) {
                     ImageRequest.Builder(ctx)
@@ -687,31 +706,13 @@ fun UserPageScreen(
     var contactSheet by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
-    // what the chat holds: null while loading; the tabs show only what is there
-    var shared by remember(conv.id) { mutableStateOf<List<MsgItem>?>(null) }
-    var tab by remember(conv.id) { mutableStateOf(TAB_GIFTS) }
-    var shown by remember(conv.id) { mutableStateOf(PAGE) }
-    var viewImage by remember { mutableStateOf<MsgItem?>(null) }
-    var viewVideo by remember { mutableStateOf<MsgItem?>(null) }
+    // the profile background picture and the All Media page
+    var coverKey by remember(conv.id) { mutableStateOf(peer?.let { coverKeyCache[it.id] }) }
+    var allMedia by remember(conv.id) { mutableStateOf(false) }
+    var allCount by remember(conv.id) { mutableStateOf<Int?>(null) }
+    var videoAvatar by remember { mutableStateOf<String?>(null) }
     var bioMenu by remember { mutableStateOf(false) }
-    val mediaItems = remember(shared) { shared.orEmpty().filter { it.msg.kind == "image" || it.msg.kind == "video" } }
-    val fileItems = remember(shared) { shared.orEmpty().filter { it.msg.kind == "file" } }
-    val voiceItems = remember(shared) { shared.orEmpty().filter { it.msg.kind == "voice" } }
-    val tabs = buildList {
-        add(TAB_GIFTS)
-        if (mediaItems.isNotEmpty()) add(TAB_MEDIA)
-        if (fileItems.isNotEmpty()) add(TAB_FILES)
-        if (voiceItems.isNotEmpty()) add(TAB_VOICE)
-    }
-    val activeTab = if (tab in tabs) tab else TAB_GIFTS
-    val voiceIds by rememberUpdatedState(voiceItems.map { it.msg.id }.toSet())
-    // a voice message started here stops when the page is left
-    DisposableEffect(Unit) {
-        onDispose {
-            val pid = VoicePlayer.playingId
-            if (pid != null && pid in voiceIds) VoicePlayer.stop()
-        }
-    }
+    val scroll = rememberScrollState()
 
     LaunchedEffect(conv.id) {
         if (peer != null) {
@@ -732,6 +733,9 @@ fun UserPageScreen(
                     bio = if (u.isNull("bio")) null else u.getString("bio")
                     location = if (u.isNull("location")) null else u.getString("location")
                     blocked = u.optBoolean("blocked")
+                    val ck = if (u.isNull("cover_key")) null else u.getString("cover_key")
+                    coverKey = ck
+                    coverKeyCache[peer.id] = ck
                     val b0 = bio
                     val l0 = location
                     val k0 = blocked
@@ -746,8 +750,9 @@ fun UserPageScreen(
             runIo({ GiftsApi.received(peer.id) }) { r ->
                 r.onSuccess { gifts = it }.onFailure { gifts = emptyList() }
             }
-            runIo({ loadShared(conv.id) }) { r ->
-                r.onSuccess { shared = it }.onFailure { shared = emptyList() }
+            // only the numbers: the All Media page loads its own pages when it is opened
+            runIo({ fetchShared(conv.id, TAB_MEDIA, null, 1).counts.values.sum() }) { r ->
+                r.onSuccess { allCount = it }
             }
         }
     }
@@ -781,10 +786,17 @@ fun UserPageScreen(
     ) {
         val aura by rememberAura(peer?.id ?: conv.id, peer?.let { Avatars.url(it.id) })
         AuraBackground(aura, Modifier.fillMaxSize())
+        // the background picture sits behind the top of the page and scrolls away with it
+        val coverNow = coverKey
+        if (coverNow != null && peer != null) {
+            CoverBackdrop(coverUrl(peer.id, coverNow), Modifier.offset { IntOffset(0, -scroll.value) })
+        }
+        // soft round plates behind the back arrow and the three dots when a picture is behind them
+        val chip = if (coverNow != null) Ui.bg.copy(alpha = 0.55f) else Color.Transparent
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -815,12 +827,19 @@ fun UserPageScreen(
                     id = peer?.id ?: conv.id,
                     name = peer?.displayName ?: "?",
                     url = avatarNow,
+                    isVideo = peer != null && Avatars.isVideo(peer.id),
                     hasStory = story != null,
                     onClick = {
                         if (story != null) onStories(listOf(story), 0, -1)
-                        else if (avatarNow != null) photoUrl = avatarNow
+                        else if (avatarNow != null) {
+                            if (peer != null && Avatars.isVideo(peer.id)) videoAvatar = avatarNow else photoUrl = avatarNow
+                        }
                     },
-                    onLongClick = { if (avatarNow != null) photoUrl = avatarNow },
+                    onLongClick = {
+                        if (avatarNow != null) {
+                            if (peer != null && Avatars.isVideo(peer.id)) videoAvatar = avatarNow else photoUrl = avatarNow
+                        }
+                    },
                     onBounds = { avatarBox = it }
                 )
             }
@@ -913,6 +932,28 @@ fun UserPageScreen(
                     }
                     Spacer(Modifier.height(13.dp))
                 }
+
+                // All Media: opens the page with Media / Files / Voice
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .glassPanel(RoundedCornerShape(24.dp))
+                        .clickable { allMedia = true }
+                        .padding(start = 16.dp, end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GalleryGlyph(Ui.ink)
+                    Spacer(Modifier.width(18.5.dp))
+                    Text("All Media", color = Ui.ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    val n = allCount
+                    if (n != null && n > 0) {
+                        Text(n.toString(), color = Ui.muted, fontSize = 15.sp)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Ui.muted)
+                }
+                Spacer(Modifier.height(13.dp))
             }
 
             msg?.let {
@@ -924,46 +965,10 @@ fun UserPageScreen(
                 )
             }
 
-            // the tabs sit at the bottom of the profile of the profile: Gifts always, Media / Files / Voice when the chat has them
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                val multi = tabs.size > 1
-                if (multi) {
-                    ProfileTabStrip(tabs, activeTab, gifts) {
-                        tab = it
-                        shown = PAGE
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-                when (activeTab) {
-                    TAB_MEDIA -> {
-                        SharedMediaGrid(conv.id, mediaItems.take(shown)) {
-                            if (it.msg.kind == "video") viewVideo = it else viewImage = it
-                        }
-                        if (mediaItems.size > shown) ShowMore { shown += PAGE }
-                        Spacer(Modifier.height(86.dp))
-                    }
-                    TAB_FILES -> {
-                        SharedFilesList(conv.id, fileItems.take(shown))
-                        if (fileItems.size > shown) ShowMore { shown += PAGE }
-                        Spacer(Modifier.height(86.dp))
-                    }
-                    TAB_VOICE -> {
-                        SharedVoiceList(
-                            conv.id,
-                            voiceItems.take(shown),
-                            me.id,
-                            ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown")
-                        )
-                        if (voiceItems.size > shown) ShowMore { shown += PAGE }
-                        Spacer(Modifier.height(86.dp))
-                    }
-                    else -> {
-                        // 6.5dp here puts the gift tiles 12dp from the edge
-                        Box(Modifier.fillMaxWidth().padding(horizontal = 6.5.dp)) {
-                            GiftsSection(gifts = gifts, onOpen = { openGift = it }, showHeader = !multi)
-                        }
-                    }
-                }
+            // gifts sit at the bottom of the profile
+            // 6.5dp here puts the gift tiles 12dp from the edge
+            Box(Modifier.fillMaxWidth().padding(horizontal = 6.5.dp)) {
+                GiftsSection(gifts = gifts, onOpen = { openGift = it }, showHeader = true)
             }
         }
 
@@ -981,6 +986,7 @@ fun UserPageScreen(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
+                    .background(chip)
                     .clickable(onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
@@ -989,7 +995,10 @@ fun UserPageScreen(
             Spacer(Modifier.weight(1f))
             if (peer != null) {
                 Box {
-                    IconButton(onClick = { menuOpen = true }) {
+                    IconButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.clip(CircleShape).background(chip)
+                    ) {
                         Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Ui.ink)
                     }
                     DropdownMenu(
@@ -998,7 +1007,7 @@ fun UserPageScreen(
                         containerColor = Ui.bg,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        MenuRow("Media", { menuOpen = false; onMedia() }) { GalleryGlyph(Ui.ink) }
+                        MenuRow("All Media", { menuOpen = false; allMedia = true }) { GalleryGlyph(Ui.ink) }
                         MenuRow("Starred Messages", { menuOpen = false; soon.show("Starred messages") }) {
                             Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
                         }
@@ -1043,7 +1052,19 @@ fun UserPageScreen(
         if (shownUrl != null && peer != null) {
             ProfilePhotoViewer(peer.id, peer.username, peer.displayName, shownUrl, avatarBox) { photoUrl = null }
         }
+
+        // the All Media page covers the profile while it is open
+        if (allMedia && peer != null) {
+            AllMediaScreen(
+                cid = conv.id,
+                meId = me.id,
+                peerName = ContactsStore.nameFor(peer.id, peer.displayName),
+                onBack = { allMedia = false }
+            )
+        }
     }
+
+    videoAvatar?.let { AvatarVideoDialog(it) { videoAvatar = null } }
 
     val shownGift = openGift
     if (shownGift != null) {
@@ -1112,9 +1133,6 @@ fun UserPageScreen(
         )
     }
 
-    viewImage?.let { ImageViewer(conv.id, it) { viewImage = null } }
-    viewVideo?.let { VideoPlayerDialog(conv.id, it) { viewVideo = null } }
-
     if (report && peer != null) {
         var reason by remember { mutableStateOf("") }
         AlertDialog(
@@ -1141,4 +1159,157 @@ fun UserPageScreen(
             dismissButton = { TextButton(onClick = { report = false }) { Text("Cancel") } }
         )
     }
+}
+
+/** The picture behind the top of a profile: softly blurred, fading into the page colour. */
+@Composable
+private fun CoverBackdrop(url: String, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val bg = Ui.bg
+    val req = remember(url) {
+        ImageRequest.Builder(ctx)
+            .data(url)
+            .addHeader("Authorization", "Bearer ${Session.token}")
+            .crossfade(true)
+            .build()
+    }
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(340.dp)
+            .clipToBounds()
+    ) {
+        AsyncImage(
+            model = req,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(6.dp, BlurredEdgeTreatment.Rectangle)
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to bg.copy(alpha = 0.25f),
+                        0.55f to bg.copy(alpha = 0.8f),
+                        1f to bg
+                    )
+                )
+        )
+    }
+}
+
+private class SharedTabState(
+    val items: List<MsgItem> = emptyList(),
+    val cursor: String? = null,
+    val loaded: Boolean = false,
+    val loading: Boolean = false,
+    val more: Boolean = false,
+    val error: String? = null
+)
+
+/** All Media: what the chat holds, in three tabs: Media (photos + videos), Files, Voice. Each tab loads its own pages. */
+@Composable
+private fun AllMediaScreen(cid: String, meId: String, peerName: String, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+    val tabs = remember { listOf(TAB_MEDIA, TAB_FILES, TAB_VOICE) }
+    var tab by remember { mutableStateOf(TAB_MEDIA) }
+    val states = remember { mutableStateMapOf<String, SharedTabState>() }
+    var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var viewImage by remember { mutableStateOf<MsgItem?>(null) }
+    var viewVideo by remember { mutableStateOf<MsgItem?>(null) }
+
+    fun load(t: String) {
+        val cur = states[t] ?: SharedTabState()
+        if (cur.loading) return
+        states[t] = SharedTabState(cur.items, cur.cursor, cur.loaded, true, cur.more, null)
+        runIo({ fetchShared(cid, t, cur.cursor) }) { r ->
+            r.onSuccess { page ->
+                counts = page.counts
+                states[t] = SharedTabState(
+                    items = (cur.items + page.items).distinctBy { it.msg.id },
+                    cursor = page.cursor ?: cur.cursor,
+                    loaded = true,
+                    loading = false,
+                    more = page.hasMore,
+                    error = null
+                )
+            }.onFailure {
+                states[t] = SharedTabState(cur.items, cur.cursor, true, false, false, it.message ?: "Couldn't load")
+            }
+        }
+    }
+
+    LaunchedEffect(tab) {
+        val st = states[tab]
+        if (st == null || (!st.loaded && !st.loading)) load(tab)
+    }
+
+    // a voice message started here stops when the page is left
+    DisposableEffect(Unit) {
+        onDispose {
+            val pid = VoicePlayer.playingId
+            if (pid != null && states[TAB_VOICE]?.items?.any { it.msg.id == pid } == true) VoicePlayer.stop()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Ui.bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        ScreenBar("All Media", onBack)
+        ProfileTabStrip(tabs, tab, counts) { tab = it }
+        Spacer(Modifier.height(4.dp))
+        val st = states[tab]
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            if (st == null || (!st.loaded && st.error == null)) {
+                Box(Modifier.fillMaxWidth().padding(top = 48.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Ui.muted, modifier = Modifier.size(28.dp))
+                }
+            } else if (st.items.isEmpty()) {
+                Text(
+                    st.error ?: when (tab) {
+                        TAB_MEDIA -> "No photos or videos yet"
+                        TAB_FILES -> "No files yet"
+                        else -> "No voice messages yet"
+                    },
+                    color = if (st.error != null) MaterialTheme.colorScheme.error else Ui.muted,
+                    fontSize = 15.sp,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(top = 48.dp)
+                )
+                if (st.error != null) ShowMore { load(tab) }
+            } else {
+                when (tab) {
+                    TAB_MEDIA -> SharedMediaGrid(cid, st.items) {
+                        if (it.msg.kind == "video") viewVideo = it else viewImage = it
+                    }
+                    TAB_FILES -> SharedFilesList(cid, st.items)
+                    else -> SharedVoiceList(cid, st.items, meId, peerName)
+                }
+                if (st.loading) {
+                    Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Ui.muted, modifier = Modifier.size(22.dp))
+                    }
+                } else if (st.more || st.error != null) {
+                    ShowMore { load(tab) }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+
+    viewImage?.let { ImageViewer(cid, it) { viewImage = null } }
+    viewVideo?.let { VideoPlayerDialog(cid, it) { viewVideo = null } }
 }
