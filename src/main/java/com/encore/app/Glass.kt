@@ -34,3 +34,24 @@ fun glassDialogColor(): Color = Ui.bg.copy(alpha = 0.94f)
 
 @Composable
 fun glassSheetColor(): Color = Ui.bg.copy(alpha = 0.92f)
+
+/**
+ * Glass for panels that sit over the aura: a fill that is lighter at the top-left,
+ * and a rim that catches light on one corner. The aura shows through it.
+ */
+@Composable
+fun Modifier.glassPanel(shape: Shape): Modifier {
+    val dark = LocalPalette.current.dark
+    val fill = Brush.linearGradient(
+        if (dark) listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.05f))
+        else listOf(Color.White.copy(alpha = 0.72f), Color.White.copy(alpha = 0.38f))
+    )
+    val rim = Brush.linearGradient(
+        if (dark) listOf(Color.White.copy(alpha = 0.55f), Color.White.copy(alpha = 0.04f), Color.White.copy(alpha = 0.2f))
+        else listOf(Color.White, Color.White.copy(alpha = 0.25f), Color.White.copy(alpha = 0.75f))
+    )
+    return this
+        .clip(shape)
+        .background(fill)
+        .border(1.dp, rim, shape)
+}
