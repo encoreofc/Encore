@@ -20,6 +20,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import org.json.JSONObject
 
 private val ProfileYellow = Color(0xFFFFC400)
@@ -37,6 +40,8 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
     var touched by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
+    // the profile background picture (its key), null when there is none
+    var coverKey by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(1200)
@@ -62,6 +67,7 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
             r.onSuccess { u ->
                 val b = if (u.isNull("bio")) "" else u.getString("bio")
                 val l = if (u.isNull("location")) "" else u.getString("location")
+                coverKey = if (u.isNull("cover_key")) null else u.getString("cover_key")
                 if (!touched) {
                     name = u.optString("display_name", name)
                     bio = b
@@ -78,17 +84,51 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
         }
     }
 
-    val pick = rememberAvatarPicker(
-        onPicked = { bytes, type ->
+    // picture, GIF or video (a video longer than 20 seconds is cut to its first 20 seconds)
+    val pick = rememberProfileAvatarPicker(
+        onStart = {
             busy = true
+            msg = "Preparing\u2026"
+        },
+        onPicked = { bytes, type, dur ->
             msg = null
-            runIo({ Api.setAvatar(bytes, type) }) { r ->
+            runIo({ Api.setAvatarMedia(bytes, type, dur) }) { r ->
                 busy = false
                 r.onFailure { msg = it.message }
             }
         },
-        onError = { msg = it }
+        onError = {
+            busy = false
+            msg = it
+        }
     )
+
+    val pickCover = rememberCoverPicker(
+        onStart = {
+            busy = true
+            msg = "Preparing\u2026"
+        },
+        onPicked = { bytes, type ->
+            msg = null
+            runIo({ Api.setCover(bytes, type) }) { r ->
+                busy = false
+                r.onSuccess { coverKey = it.coverKey }.onFailure { msg = it.message }
+            }
+        },
+        onError = {
+            busy = false
+            msg = it
+        }
+    )
+
+    fun removeCover() {
+        busy = true
+        msg = null
+        runIo({ Api.removeCover() }) { r ->
+            busy = false
+            r.onSuccess { coverKey = null }.onFailure { msg = it.message }
+        }
+    }
 
     fun save() {
         busy = true
@@ -148,6 +188,8 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Box(modifier = Modifier.clip(CircleShape).clickable { pick() }) {
                 Avatar(me.id, name.ifBlank { me.username }, 120.dp)
+                val videoUrl = if (Avatars.isVideo(me.id)) Avatars.url(me.id) else null
+                if (videoUrl != null) LoopingVideo(videoUrl, Modifier.matchParentSize())
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -168,7 +210,7 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
             }
             Spacer(Modifier.height(10.dp))
             Text(
-                "Change photo",
+                "Change photo or video",
                 color = Ui.ink,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
@@ -178,6 +220,67 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             )
             Text("@" + me.username, color = Ui.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
+            Spacer(Modifier.height(20.dp))
+            // profile background: shown softly behind the top of your profile page
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(110.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Ui.soft)
+                    .clickable { pickCover() },
+                contentAlignment = Alignment.Center
+            ) {
+                val ck = coverKey
+                if (ck != null) {
+                    val ctx = LocalContext.current
+                    val url = coverUrl(me.id, ck)
+                    val req = remember(url) {
+                        ImageRequest.Builder(ctx)
+                            .data(url)
+                            .addHeader("Authorization", "Bearer ${Session.token}")
+                            .crossfade(true)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = req,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Text(
+                        "Change background",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x99000000))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add profile background", color = Ui.muted, fontSize = 15.sp)
+                    }
+                }
+            }
+            if (coverKey != null) {
+                Text(
+                    "Remove background",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { removeCover() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
             Spacer(Modifier.height(24.dp))
             OutlinedTextField(
                 value = name,
@@ -243,7 +346,7 @@ fun ProfileScreen(me: User, onBack: () -> Unit, onLogout: () -> Unit) {
             msg?.let {
                 Text(
                     it,
-                    color = if (it == "Saved") Ui.muted else MaterialTheme.colorScheme.error,
+                    color = if (it == "Saved" || it.startsWith("Preparing")) Ui.muted else MaterialTheme.colorScheme.error,
                     fontSize = 13.sp,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
