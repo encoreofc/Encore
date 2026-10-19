@@ -73,7 +73,7 @@ import kotlin.math.abs
 import kotlin.math.min
 
 /** One profile photo. at = when it was set (ms), 0 = not known (set before history existed). */
-class ProfilePhoto(val url: String, val at: Long)
+class ProfilePhoto(val url: String, val at: Long, val video: Boolean = false)
 
 private fun ppFetchPhotos(userId: String, currentUrl: String): List<ProfilePhoto> {
     val j = Api.call("GET", "/v1/users/$userId/photos")
@@ -85,7 +85,9 @@ private fun ppFetchPhotos(userId: String, currentUrl: String): List<ProfilePhoto
         // the photo in use is already loaded in the profile, so it keeps the same address
         ProfilePhoto(
             if (id == cur) currentUrl else "$API_BASE/v1/avatar/p/$userId/$id",
-            o.optLong("created_at")
+            o.optLong("created_at"),
+            // a profile video has "video" as its kind (its id starts with w)
+            o.optString("kind") == "video" || id.startsWith("w")
         )
     }
 }
@@ -362,6 +364,25 @@ private fun PpPhoto(url: String) {
     }
 }
 
+/** A profile video in the viewer: with sound, looping, the whole picture visible. Plays only while it is the page on screen. */
+@Composable
+private fun PpVideo(url: String, active: Boolean) {
+    var ready by remember(url) { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        LoopingVideo(
+            url = url,
+            modifier = Modifier.fillMaxSize(),
+            muted = false,
+            crop = false,
+            active = active,
+            onReady = { ready = true }
+        )
+        if (!ready) {
+            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+        }
+    }
+}
+
 @Composable
 private fun PpSegments(count: Int, current: Int) {
     Row(
@@ -421,7 +442,7 @@ fun ProfilePhotoViewer(
     val scope = rememberCoroutineScope()
 
     // the photo in use is known right away, the rest of the history is filled in when it arrives
-    var pages by remember(userId, currentUrl) { mutableStateOf(listOf(ProfilePhoto(currentUrl, 0L))) }
+    var pages by remember(userId, currentUrl) { mutableStateOf(listOf(ProfilePhoto(currentUrl, 0L, Avatars.isVideo(userId)))) }
     var menu by remember { mutableStateOf(false) }
     var chrome by remember { mutableStateOf(true) }
     var closing by remember { mutableStateOf(false) }
@@ -445,7 +466,7 @@ fun ProfilePhotoViewer(
     LaunchedEffect(pager.currentPage, pages) {
         val i = pager.currentPage
         for (j in listOf(i - 1, i + 1)) {
-            pages.getOrNull(j)?.let { ctx.imageLoader.enqueue(ppRequest(ctx, it.url)) }
+            pages.getOrNull(j)?.let { if (!it.video) ctx.imageLoader.enqueue(ppRequest(ctx, it.url)) }
         }
     }
 
@@ -482,11 +503,12 @@ fun ProfilePhotoViewer(
         val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
         val base = "Encore_" + (if (safe.isEmpty()) "photo" else safe) + "_" + stamp
         val app = ctx.applicationContext
-        runIo({ PhotoSaver.save(app, page.url, base, toGallery) }) { r ->
+        val isVideo = page.video
+        runIo({ PhotoSaver.save(app, page.url, base, toGallery, video = isVideo) }) { r ->
             r.onSuccess {
                 Toast.makeText(app, if (toGallery) "Saved to Gallery" else "Saved to Downloads", Toast.LENGTH_SHORT).show()
             }.onFailure {
-                Toast.makeText(app, it.message ?: "Couldn't save the photo", Toast.LENGTH_SHORT).show()
+                Toast.makeText(app, it.message ?: (if (isVideo) "Couldn't save the video" else "Couldn't save the photo"), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -561,7 +583,8 @@ fun ProfilePhotoViewer(
                         }
                     }
             ) { i ->
-                PpPhoto(pages[i].url)
+                val page = pages[i]
+                if (page.video) PpVideo(page.url, active = pager.currentPage == i) else PpPhoto(page.url)
             }
         }
 
@@ -597,10 +620,11 @@ fun ProfilePhotoViewer(
                         )
                         val at = pages.getOrNull(pager.currentPage)?.at ?: 0L
                         val dateText = if (at > 0L) dateFmt.format(java.util.Date(at)) else null
+                        val isVid = pages.getOrNull(pager.currentPage)?.video == true
                         val sub = if (pages.size > 1) {
                             (pager.currentPage + 1).toString() + " of " + pages.size + (if (dateText != null) " · $dateText" else "")
                         } else {
-                            dateText ?: "Profile photo"
+                            dateText ?: (if (isVid) "Profile video" else "Profile photo")
                         }
                         Text(sub, color = Color(0xB3FFFFFF), fontSize = 12.sp)
                     }
@@ -614,7 +638,8 @@ fun ProfilePhotoViewer(
 
     if (menu) {
         ModalBottomSheet(onDismissRequest = { menu = false }, containerColor = Ui.bg) {
-            PpAction("Save to Gallery", "Pictures \u00B7 Encore", { PpGalleryGlyph(Ui.ink) }) { save(true) }
+            val vidNow = pages.getOrNull(pager.currentPage)?.video == true
+            PpAction("Save to Gallery", (if (vidNow) "Movies" else "Pictures") + " \u00B7 Encore", { PpGalleryGlyph(Ui.ink) }) { save(true) }
             PpAction("Save to Downloads", "Download \u00B7 Encore", { PpDownloadGlyph(Ui.ink) }) { save(false) }
             Spacer(Modifier.height(16.dp))
         }
