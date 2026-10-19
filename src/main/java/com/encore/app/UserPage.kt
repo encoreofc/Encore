@@ -798,10 +798,10 @@ fun UserPageScreen(
                     .statusBarsPadding()
                     .padding(top = 40.dp)
                     .drawBehind {
-                        val r = 170.dp.toPx()
+                        val r = 120.dp.toPx()
                         drawCircle(
                             brush = Brush.radialGradient(
-                                listOf(aura.copy(alpha = 0.65f), Color.Transparent),
+                                listOf(aura.copy(alpha = 0.16f), Color.Transparent),
                                 center = center,
                                 radius = r
                             ),
