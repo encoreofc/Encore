@@ -1,4 +1,4 @@
-package com.encore.app
+package com.encore.app 
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
