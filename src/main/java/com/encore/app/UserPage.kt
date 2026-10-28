@@ -58,6 +58,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -78,9 +80,36 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 
 // ---------------------------------------------------------------------------
-// Encore profile. Layout as before: round photo, four glass tiles, info card,
-// All Media, gifts at the bottom. No aura / glow behind the photo any more.
+// Encore profile. Light design: grey page, white cards, small grey section
+// headings. Top: round photo, name, @username, four tiles. Then Bio, Chat,
+// Shared Media, and the gifts at the bottom.
 // ---------------------------------------------------------------------------
+
+/**
+ * Colours of this page. Light mode: grey page with white cards.
+ * Dark mode keeps the app's own colours (Ui) and only adds a soft card tone.
+ */
+private object Pf {
+    private val dark: Boolean
+        @Composable get() = Ui.bg.luminance() < 0.5f
+
+    val bg: Color
+        @Composable get() = if (dark) Ui.bg else Color(0xFFEFEFEF)
+    val card: Color
+        @Composable get() = if (dark) lerp(Ui.bg, Ui.ink, 0.08f) else Color.White
+    val sheet: Color
+        @Composable get() = if (dark) Ui.bg else Color.White
+    val soft: Color
+        @Composable get() = if (dark) Ui.soft else Color(0xFFE7E7E9)
+    val ink: Color
+        @Composable get() = Ui.ink
+    val muted: Color
+        @Composable get() = Ui.muted
+    val onInk: Color
+        @Composable get() = Ui.onInk
+    val line: Color
+        @Composable get() = Ui.line
+}
 
 // change this to your real profile-link base when the website exists
 private const val SHARE_BASE = "https://encore.app/"
@@ -388,8 +417,8 @@ private fun PlayGlyph(color: Color, boxSize: Dp, playing: Boolean = false) {
 /** The bell; when muted a slash is drawn across it with a small gap in the tile colour. */
 @Composable
 private fun MuteGlyph(muted: Boolean) {
-    val ink = Ui.ink
-    val soft = Ui.soft
+    val ink = Pf.ink
+    val soft = Pf.card
     Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
         Icon(Icons.Default.Notifications, contentDescription = null, tint = ink, modifier = Modifier.size(24.dp))
         if (muted) {
@@ -407,13 +436,14 @@ private fun MuteGlyph(muted: Boolean) {
 // Profile building blocks (same look as before)
 // ---------------------------------------------------------------------------
 
-/** One action under the name: a glass tile, 64dp tall. */
+/** One action under the name: a white tile, 64dp tall. */
 @Composable
 private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
     Column(
         modifier = modifier
             .height(64.dp)
-            .glassPanel(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(Pf.card)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -422,38 +452,70 @@ private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = 
         Spacer(Modifier.height(4.dp))
         Text(
             label,
-            color = Ui.ink,
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
-            fontWeight = FontWeight.Bold,
+            color = Pf.ink,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
     }
 }
 
-/** A row of the info card: the value on top (16sp), the small grey label under it (13sp). */
+/** A small grey heading above a card (like Messenger's section titles), with an optional action on the right. */
 @Composable
-private fun InfoRow(value: String, label: String, valueLineHeight: TextUnit) {
-    Column(
-        modifier = Modifier
+private fun SectionHead(text: String, action: String? = null, onAction: () -> Unit = {}) {
+    Row(
+        Modifier
             .fillMaxWidth()
-            .padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 10.dp)
+            .padding(start = 30.dp, end = 26.dp, top = 22.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(value, color = Ui.ink, fontSize = 16.sp, lineHeight = valueLineHeight)
-        Spacer(Modifier.height(5.dp))
-        Text(label, color = Ui.muted, fontSize = 13.sp, lineHeight = 16.sp)
+        Text(
+            text,
+            color = Pf.muted,
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+        if (action != null) {
+            Text(
+                action,
+                color = Pf.ink,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 
-/** A row of a glass card: icon, label, optional value, arrow. */
+/** The white rounded card a section sits on. */
+@Composable
+private fun PfCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 14.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Pf.card),
+        content = content
+    )
+}
+
+/** A row of a card: icon, label, optional value, arrow. */
 @Composable
 private fun GlassRow(
     label: String,
     value: String?,
     onClick: () -> Unit,
     divider: Boolean,
-    labelColor: Color = Ui.ink,
+    labelColor: Color = Pf.ink,
     icon: @Composable () -> Unit
 ) {
     Box(
@@ -472,10 +534,10 @@ private fun GlassRow(
             Spacer(Modifier.width(18.5.dp))
             Text(label, color = labelColor, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (!value.isNullOrEmpty()) {
-                Text(value, color = Ui.muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
+                Text(value, color = Pf.muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
                 Spacer(Modifier.width(2.dp))
             }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Ui.muted)
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Pf.muted)
         }
         if (divider) {
             Box(
@@ -484,14 +546,14 @@ private fun GlassRow(
                     .padding(start = 58.dp)
                     .fillMaxWidth()
                     .height(Dp.Hairline)
-                    .background(Ui.muted.copy(alpha = 0.2f))
+                    .background(Pf.muted.copy(alpha = 0.2f))
             )
         }
     }
 }
 
 @Composable
-private fun MenuRow(label: String, onClick: () -> Unit, color: Color = Ui.ink, icon: @Composable () -> Unit) {
+private fun MenuRow(label: String, onClick: () -> Unit, color: Color = Pf.ink, icon: @Composable () -> Unit) {
     DropdownMenuItem(
         text = { Text(label, color = color) },
         leadingIcon = icon,
@@ -511,12 +573,12 @@ private fun ChoiceDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Ui.bg,
-        title = { Text(title, color = Ui.ink) },
+        containerColor = Pf.sheet,
+        title = { Text(title, color = Pf.ink) },
         text = {
             Column {
                 if (hint != null) {
-                    Text(hint, color = Ui.muted, fontSize = 14.sp, lineHeight = 20.sp)
+                    Text(hint, color = Pf.muted, fontSize = 14.sp, lineHeight = 20.sp)
                     Spacer(Modifier.height(8.dp))
                 }
                 options.forEachIndexed { i, label ->
@@ -531,16 +593,16 @@ private fun ChoiceDialog(
                         RadioButton(
                             selected = i == selected,
                             onClick = null,
-                            colors = RadioButtonDefaults.colors(selectedColor = Ui.ink, unselectedColor = Ui.muted),
+                            colors = RadioButtonDefaults.colors(selectedColor = Pf.ink, unselectedColor = Pf.muted),
                             modifier = Modifier.padding(horizontal = 8.dp)
                         )
-                        Text(label, color = Ui.ink, fontSize = 16.sp)
+                        Text(label, color = Pf.ink, fontSize = 16.sp)
                     }
                 }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Ui.ink) } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Pf.ink) } }
     )
 }
 
@@ -573,7 +635,7 @@ private fun HeroAvatar(
             modifier = Modifier
                 .size(photo)
                 .clip(CircleShape)
-                .background(Ui.soft)
+                .background(Pf.soft)
         ) {
             // the letters show until the photo is there, or when there is no photo
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Avatar(id, name, photo) }
@@ -660,6 +722,8 @@ fun UserPageScreen(
     // the All Media page (Media / Files / Voice / Links); null while closed, else the tab to open
     var allTab by remember(conv.id) { mutableStateOf<String?>(null) }
     var allCount by remember(conv.id) { mutableStateOf<Int?>(null) }
+    // the first few photos / videos shown under "Shared Media"
+    var peek by remember(conv.id) { mutableStateOf<List<MsgItem>?>(null) }
     var starredOpen by remember { mutableStateOf(false) }
     var bioMenu by remember { mutableStateOf(false) }
     var muteDialog by remember { mutableStateOf(false) }
@@ -725,9 +789,12 @@ fun UserPageScreen(
             runIo({ GiftsApi.received(peer.id) }) { r ->
                 r.onSuccess { gifts = it }.onFailure { gifts = emptyList() }
             }
-            // only the numbers: the All Media page loads its own pages when it is opened
-            runIo({ fetchShared(conv.id, TAB_MEDIA, null, 1).counts.values.sum() }) { r ->
-                r.onSuccess { allCount = it }
+            // the total and the first few thumbnails: the All Media page loads its own pages when it is opened
+            runIo({ fetchShared(conv.id, TAB_MEDIA, null, 6) }) { r ->
+                r.onSuccess { p ->
+                    allCount = p.counts.values.sum()
+                    peek = p.items.take(3)
+                }
             }
         }
     }
@@ -773,7 +840,7 @@ fun UserPageScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Ui.bg)
+            .background(Pf.bg)
     ) {
         // the background picture sits behind the top of the page and scrolls away with it
         val coverNow = coverKey
@@ -781,7 +848,7 @@ fun UserPageScreen(
             CoverBackdrop(coverUrl(peer.id, coverNow), Modifier.offset { IntOffset(0, -scroll.value) })
         }
         // soft round plates behind the back arrow and the three dots when a picture is behind them
-        val chip = if (coverNow != null) Ui.bg.copy(alpha = 0.55f) else Color.Transparent
+        val chip = if (coverNow != null) Pf.bg.copy(alpha = 0.55f) else Color.Transparent
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -816,18 +883,18 @@ fun UserPageScreen(
             }
 
             // name
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
             Row(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
-                    color = Ui.ink,
-                    fontSize = 26.sp,
-                    lineHeight = 32.sp,
-                    letterSpacing = (-0.4).sp,
-                    fontWeight = FontWeight.Bold,
+                    color = Pf.ink,
+                    fontSize = 24.sp,
+                    lineHeight = 30.sp,
+                    letterSpacing = (-0.3).sp,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -835,136 +902,149 @@ fun UserPageScreen(
                 Badge(peer?.id, 24.sp, name = peer?.displayName)
             }
 
+            // the username sits where a phone number would be; tap copies it
+            if (peer != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "@" + peer.username,
+                    color = Pf.muted,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { copyText(appCtx, "@" + peer.username, "Username copied") }
+                        .padding(horizontal = 10.dp, vertical = 2.dp)
+                )
+            }
+
             // a blocked person is always one tap from being unblocked
             if (blocked && peer != null) {
                 Spacer(Modifier.height(12.dp))
                 Row(
                     Modifier
-                        .padding(horizontal = 12.dp)
+                        .padding(horizontal = 14.dp)
                         .fillMaxWidth()
-                        .glassPanel(RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Pf.card)
                         .padding(start = 18.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("You blocked this user", color = Ui.ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { blockTap() }) { Text("Unblock", color = Ui.ink, fontWeight = FontWeight.Bold) }
+                    Text("You blocked this user", color = Pf.ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { blockTap() }) { Text("Unblock", color = Pf.ink, fontWeight = FontWeight.SemiBold) }
                 }
             }
 
-            // glass tiles
-            Spacer(Modifier.height(26.dp))
+            // the four tiles
+            Spacer(Modifier.height(22.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 14.dp, end = 14.dp, top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ActionTile(if (muted) "Unmute" else "Mute", { if (muted) unmute() else muteDialog = true }, Modifier.weight(1f)) { MuteGlyph(muted) }
                 ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
-                    Icon(Icons.Default.Call, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Default.Call, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                 }
-                ActionTile("Video", { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Ui.ink) }
+                ActionTile("Video", { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Pf.ink) }
                 ActionTile("Search", onSearch, Modifier.weight(1f)) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                 }
             }
 
-            // 12dp under the tiles + 6dp empty row
-            Spacer(Modifier.height(18.dp))
-
             if (peer != null) {
-                // the info card: bio, username, place
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth()
-                        .glassPanel(RoundedCornerShape(24.dp))
-                ) {
-                    val b = bio
-                    if (!b.isNullOrBlank()) {
-                        // press and hold: a Copy button
+                // Bio: its own small section, only when there is one. Press and hold: a Copy button
+                val b = bio
+                if (!b.isNullOrBlank()) {
+                    SectionHead("Bio")
+                    PfCard {
                         Box(Modifier.combinedClickable(onClick = {}, onLongClick = { bioMenu = true })) {
-                            InfoRow(b, "Bio", 19.sp)
+                            Text(
+                                b,
+                                color = Pf.ink,
+                                fontSize = 16.sp,
+                                lineHeight = 22.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                            )
                             DropdownMenu(
                                 expanded = bioMenu,
                                 onDismissRequest = { bioMenu = false },
-                                containerColor = Ui.bg,
+                                containerColor = Pf.sheet,
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                MenuRow("Copy", { bioMenu = false; copyText(appCtx, b, "Bio copied") }) { CopyGlyph(Ui.ink) }
+                                MenuRow("Copy", { bioMenu = false; copyText(appCtx, b, "Bio copied") }) { CopyGlyph(Pf.ink) }
                             }
                         }
                     }
-                    // tap: the username is copied
-                    Box(Modifier.clickable { copyText(appCtx, "@" + peer.username, "Username copied") }) {
-                        InfoRow("@" + peer.username, "Username", 20.sp)
-                    }
-                    val loc = location
-                    if (!loc.isNullOrBlank()) {
-                        InfoRow(loc, "Location", 20.sp)
-                    }
-                }
-                Spacer(Modifier.height(14.5.dp))
-
-                if (!inContacts) {
-                    Row(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .glassPanel(RoundedCornerShape(24.dp))
-                            .clickable { contactSheet = true }
-                            .padding(start = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(18.5.dp))
-                        Text("Add to contacts", color = Ui.ink, fontSize = 16.sp)
-                    }
-                    Spacer(Modifier.height(13.dp))
                 }
 
-                // All Media: opens the page with Media / Files / Voice / Links
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .glassPanel(RoundedCornerShape(24.dp))
-                        .clickable { allTab = TAB_MEDIA }
-                        .padding(start = 16.dp, end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GalleryGlyph(Ui.ink)
-                    Spacer(Modifier.width(18.5.dp))
-                    Text("All Media", color = Ui.ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    val n = allCount
-                    if (n != null && n > 0) {
-                        Text(n.toString(), color = Ui.muted, fontSize = 15.sp)
+                val loc = location
+                if (!loc.isNullOrBlank()) {
+                    SectionHead("Location")
+                    PfCard {
+                        Text(
+                            loc,
+                            color = Pf.ink,
+                            fontSize = 16.sp,
+                            lineHeight = 22.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        )
                     }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Ui.muted)
                 }
-                Spacer(Modifier.height(13.dp))
 
                 // chat settings and personal things
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth()
-                        .glassPanel(RoundedCornerShape(24.dp))
-                ) {
-                    GlassRow("Disappearing messages", ttlLabel(ttl), { ttlDialog = true }, true) { TimerGlyph(Ui.ink) }
+                SectionHead("Chat")
+                PfCard {
+                    if (!inContacts) {
+                        GlassRow("Add to contacts", null, { contactSheet = true }, true) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
+                        }
+                    }
+                    GlassRow("Disappearing messages", ttlLabel(ttl), { ttlDialog = true }, true) { TimerGlyph(Pf.ink) }
                     GlassRow("Starred messages", null, { starredOpen = true }, true) {
-                        Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.Star, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                     }
                     GlassRow("Private note", if (note.isBlank()) "Add" else note.replace('\n', ' '), { noteDialog = true }, true) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                     }
                     GlassRow("Share profile", null, { shareProfile(ctx, ContactsStore.nameFor(peer.id, peer.displayName), peer.username) }, false) {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.Share, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                     }
                 }
-                Spacer(Modifier.height(13.dp))
+
+                // Shared Media: the first few thumbnails, "See All" opens the page with Media / Files / Voice / Links
+                val total = allCount ?: 0
+                if (total > 0) {
+                    SectionHead("Shared Media", "See All") { allTab = TAB_MEDIA }
+                    val pk = peek
+                    PfCard {
+                        if (!pk.isNullOrEmpty()) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                pk.forEach { item ->
+                                    Box(Modifier.weight(1f).aspectRatio(1.25f)) {
+                                        MediaTile(conv.id, item) { allTab = TAB_MEDIA }
+                                    }
+                                }
+                                // the tiles keep the same size when there are fewer than three
+                                repeat(3 - pk.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        } else {
+                            GlassRow("Files, voice and links", total.toString(), { allTab = TAB_MEDIA }, false) { FilesGlyph(Pf.ink) }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
             }
 
             // gifts sit at the bottom of the profile
@@ -994,7 +1074,7 @@ fun UserPageScreen(
                     .clickable(onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Ui.ink)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Pf.ink)
             }
             Spacer(Modifier.weight(1f))
             if (peer != null) {
@@ -1003,35 +1083,35 @@ fun UserPageScreen(
                         onClick = { menuOpen = true },
                         modifier = Modifier.clip(CircleShape).background(chip)
                     ) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Ui.ink)
+                        Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Pf.ink)
                     }
                     DropdownMenu(
                         expanded = menuOpen,
                         onDismissRequest = { menuOpen = false },
-                        containerColor = Ui.bg,
+                        containerColor = Pf.sheet,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        MenuRow("All Media", { menuOpen = false; allTab = TAB_MEDIA }) { GalleryGlyph(Ui.ink) }
+                        MenuRow("All Media", { menuOpen = false; allTab = TAB_MEDIA }) { GalleryGlyph(Pf.ink) }
                         MenuRow("Starred Messages", { menuOpen = false; starredOpen = true }) {
-                            Icon(Icons.Default.Star, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Star, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                         }
                         if (!blocked) {
-                            MenuRow("Send a gift", { menuOpen = false; shopOpen = true }) { GiftGlyph(Ui.ink, 24.dp) }
+                            MenuRow("Send a gift", { menuOpen = false; shopOpen = true }) { GiftGlyph(Pf.ink, 24.dp) }
                         }
                         if (inContacts) {
                             MenuRow("Edit contact", { menuOpen = false; contactSheet = true }) {
-                                Icon(Icons.Default.Edit, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                             }
                             MenuRow("Delete contact", { menuOpen = false; confirmRemove = true }, MaterialTheme.colorScheme.error) {
                                 Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
                             }
                         } else {
                             MenuRow("Add to contacts", { menuOpen = false; contactSheet = true }) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = Ui.ink, modifier = Modifier.size(24.dp))
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                             }
                         }
-                        HorizontalDivider(color = Ui.line)
-                        MenuRow(if (blocked) "Unblock user" else "Block user", { menuOpen = false; blockTap() }) { BlockGlyph(Ui.ink) }
+                        HorizontalDivider(color = Pf.line)
+                        MenuRow(if (blocked) "Unblock user" else "Block user", { menuOpen = false; blockTap() }) { BlockGlyph(Pf.ink) }
                         MenuRow("Report", { menuOpen = false; report = true }, MaterialTheme.colorScheme.error) {
                             Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
                         }
@@ -1080,12 +1160,12 @@ fun UserPageScreen(
                     .navigationBarsPadding()
                     .padding(start = 20.dp, end = 20.dp, bottom = 76.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(if (isError) MaterialTheme.colorScheme.error else Ui.ink)
+                    .background(if (isError) MaterialTheme.colorScheme.error else Pf.ink)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Text(
                     text,
-                    color = if (isError) MaterialTheme.colorScheme.onError else Ui.onInk,
+                    color = if (isError) MaterialTheme.colorScheme.onError else Pf.onInk,
                     fontSize = 14.sp,
                     lineHeight = 19.sp
                 )
@@ -1166,11 +1246,11 @@ fun UserPageScreen(
         var draft by remember { mutableStateOf(note) }
         AlertDialog(
             onDismissRequest = { noteDialog = false },
-            containerColor = Ui.bg,
-            title = { Text("Private note", color = Ui.ink) },
+            containerColor = Pf.sheet,
+            title = { Text("Private note", color = Pf.ink) },
             text = {
                 Column {
-                    Text("Only you can see this. How you met, a birthday, anything you want to remember.", color = Ui.muted, fontSize = 14.sp, lineHeight = 20.sp)
+                    Text("Only you can see this. How you met, a birthday, anything you want to remember.", color = Pf.muted, fontSize = 14.sp, lineHeight = 20.sp)
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = draft,
@@ -1189,16 +1269,16 @@ fun UserPageScreen(
                     LocalPrefs.setNote(appCtx, peer.id, v)
                     note = v
                     noteDialog = false
-                }) { Text("Save", color = Ui.ink, fontWeight = FontWeight.Bold) }
+                }) { Text("Save", color = Pf.ink, fontWeight = FontWeight.Bold) }
             },
-            dismissButton = { TextButton(onClick = { noteDialog = false }) { Text("Cancel", color = Ui.ink) } }
+            dismissButton = { TextButton(onClick = { noteDialog = false }) { Text("Cancel", color = Pf.ink) } }
         )
     }
 
     if (confirmRemove && peer != null) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            containerColor = Ui.bg,
+            containerColor = Pf.sheet,
             title = { Text("Delete ${ContactsStore.nameFor(peer.id, peer.displayName)}?") },
             text = { Text("They will be removed from your contacts. Your chat with them stays.") },
             confirmButton = {
@@ -1215,7 +1295,7 @@ fun UserPageScreen(
         var alsoReport by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { confirmBlock = false },
-            containerColor = Ui.bg,
+            containerColor = Pf.sheet,
             title = { Text("Block ${peer.displayName}?") },
             text = {
                 Column {
@@ -1231,7 +1311,7 @@ fun UserPageScreen(
                         Checkbox(
                             checked = alsoReport,
                             onCheckedChange = null,
-                            colors = CheckboxDefaults.colors(checkedColor = Ui.ink, checkmarkColor = Ui.onInk),
+                            colors = CheckboxDefaults.colors(checkedColor = Pf.ink, checkmarkColor = Pf.onInk),
                             modifier = Modifier.padding(end = 10.dp, top = 8.dp, bottom = 8.dp)
                         )
                         Text("Also report this user")
@@ -1260,7 +1340,7 @@ fun UserPageScreen(
         var details by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { report = false },
-            containerColor = Ui.bg,
+            containerColor = Pf.sheet,
             title = { Text("Report user") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -1276,7 +1356,7 @@ fun UserPageScreen(
                             RadioButton(
                                 selected = pick == i,
                                 onClick = null,
-                                colors = RadioButtonDefaults.colors(selectedColor = Ui.ink, unselectedColor = Ui.muted),
+                                colors = RadioButtonDefaults.colors(selectedColor = Pf.ink, unselectedColor = Pf.muted),
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
                             Text(label, fontSize = 15.sp)
@@ -1313,7 +1393,7 @@ fun UserPageScreen(
 @Composable
 private fun CoverBackdrop(url: String, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
-    val bg = Ui.bg
+    val bg = Pf.bg
     val req = remember(url) {
         ImageRequest.Builder(ctx)
             .data(url)
@@ -1359,7 +1439,7 @@ private fun StarredScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Ui.bg)
+            .background(Pf.bg)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -1376,15 +1456,15 @@ private fun StarredScreen(onBack: () -> Unit) {
                 Modifier
                     .size(72.dp)
                     .clip(CircleShape)
-                    .background(Ui.soft),
+                    .background(Pf.soft),
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.Star, contentDescription = null, tint = Ui.muted, modifier = Modifier.size(30.dp)) }
+            ) { Icon(Icons.Default.Star, contentDescription = null, tint = Pf.muted, modifier = Modifier.size(30.dp)) }
             Spacer(Modifier.height(16.dp))
-            Text("No starred messages", color = Ui.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("No starred messages", color = Pf.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(
                 "Messages you star in this chat will be kept here.",
-                color = Ui.muted,
+                color = Pf.muted,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
                 textAlign = TextAlign.Center
@@ -1433,7 +1513,7 @@ private fun UnderlineTabs(tabs: List<String>, selected: String, onSelect: (Strin
                         tabTitle(t),
                         fontSize = 15.sp,
                         fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                        color = if (on) Ui.ink else Ui.muted,
+                        color = if (on) Pf.ink else Pf.muted,
                         maxLines = 1
                     )
                     if (on) {
@@ -1443,13 +1523,13 @@ private fun UnderlineTabs(tabs: List<String>, selected: String, onSelect: (Strin
                                 .width(28.dp)
                                 .height(3.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(Ui.ink)
+                                .background(Pf.ink)
                         )
                     }
                 }
             }
         }
-        Box(Modifier.fillMaxWidth().height(Dp.Hairline).background(Ui.muted.copy(alpha = 0.2f)))
+        Box(Modifier.fillMaxWidth().height(Dp.Hairline).background(Pf.muted.copy(alpha = 0.2f)))
     }
 }
 
@@ -1457,7 +1537,7 @@ private fun UnderlineTabs(tabs: List<String>, selected: String, onSelect: (Strin
 private fun MonthHead(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        color = Ui.muted,
+        color = Pf.muted,
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 0.8.sp,
@@ -1468,7 +1548,7 @@ private fun MonthHead(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun CenterSpinner() {
     Box(Modifier.fillMaxSize().padding(top = 64.dp), contentAlignment = Alignment.TopCenter) {
-        CircularProgressIndicator(color = Ui.muted, strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp))
+        CircularProgressIndicator(color = Pf.muted, strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp))
     }
 }
 
@@ -1476,11 +1556,11 @@ private fun CenterSpinner() {
 private fun ListFooter(loading: Boolean, error: String?, onRetry: () -> Unit) {
     Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
         if (loading) {
-            CircularProgressIndicator(color = Ui.muted, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+            CircularProgressIndicator(color = Pf.muted, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
         } else if (error != null) {
             Text(
                 "Couldn't load. Tap to try again",
-                color = Ui.muted,
+                color = Pf.muted,
                 fontSize = 14.sp,
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
@@ -1504,23 +1584,23 @@ private fun EmptyShared(tab: String, error: String?, onRetry: () -> Unit) {
             Modifier
                 .size(72.dp)
                 .clip(CircleShape)
-                .background(Ui.soft),
+                .background(Pf.soft),
             contentAlignment = Alignment.Center
         ) {
             when (tab) {
-                TAB_MEDIA -> GalleryGlyph(Ui.muted, 30.dp)
-                TAB_FILES -> FilesGlyph(Ui.muted, 30.dp)
-                TAB_VOICE -> VoiceGlyph(Ui.muted, 30.dp)
-                else -> LinkGlyph(Ui.muted, 30.dp)
+                TAB_MEDIA -> GalleryGlyph(Pf.muted, 30.dp)
+                TAB_FILES -> FilesGlyph(Pf.muted, 30.dp)
+                TAB_VOICE -> VoiceGlyph(Pf.muted, 30.dp)
+                else -> LinkGlyph(Pf.muted, 30.dp)
             }
         }
         Spacer(Modifier.height(16.dp))
         if (error != null) {
-            Text("Couldn't load", color = Ui.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("Couldn't load", color = Pf.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text(error, color = Ui.muted, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
+            Text(error, color = Pf.muted, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(14.dp))
-            TextButton(onClick = onRetry) { Text("Try again", color = Ui.ink, fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onRetry) { Text("Try again", color = Pf.ink, fontWeight = FontWeight.Bold) }
         } else {
             val (title, sub) = when (tab) {
                 TAB_MEDIA -> "No photos or videos" to "Photos and videos you share in this chat will appear here."
@@ -1528,9 +1608,9 @@ private fun EmptyShared(tab: String, error: String?, onRetry: () -> Unit) {
                 TAB_VOICE -> "No voice messages" to "Voice messages from this chat will appear here."
                 else -> "No links" to "Links sent in this chat will appear here."
             }
-            Text(title, color = Ui.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Pf.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text(sub, color = Ui.muted, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
+            Text(sub, color = Pf.muted, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
         }
     }
 }
@@ -1567,7 +1647,7 @@ private fun MediaTile(cid: String, item: MsgItem, onOpen: (MsgItem) -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isVideo) Color(0xFF1B1D21) else Ui.soft)
+            .background(if (isVideo) Color(0xFF1B1D21) else Pf.soft)
             .clickable { onOpen(item) }
     ) {
         if (!isVideo) {
@@ -1693,11 +1773,11 @@ private fun SharedFilesList(cid: String, st: SharedTabState, onMore: () -> Unit)
                             FileBadge(m.name)
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(m.name, color = Ui.ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(m.name, color = Pf.ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
                                     fileSizeText(m.size) + "  \u2022  " + dateFmt.format(at) + ", " + timeFmt.format(at),
-                                    color = Ui.muted,
+                                    color = Pf.muted,
                                     fontSize = 13.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -1715,8 +1795,8 @@ private fun SharedFilesList(cid: String, st: SharedTabState, onMore: () -> Unit)
 /** A voice message drawn as a wave; the played part fills as it plays. The bars come from the message id, so they stay the same. */
 @Composable
 private fun Wave(id: String, progress: Float, modifier: Modifier) {
-    val on = Ui.ink
-    val off = Ui.muted.copy(alpha = 0.35f)
+    val on = Pf.ink
+    val off = Pf.muted.copy(alpha = 0.35f)
     Canvas(modifier) {
         val n = 34
         val gap = 3.dp.toPx()
@@ -1771,16 +1851,16 @@ private fun SharedVoiceList(cid: String, st: SharedTabState, meId: String, peerN
                                 Modifier
                                     .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(Ui.ink),
+                                    .background(Pf.ink),
                                 contentAlignment = Alignment.Center
-                            ) { PlayGlyph(Ui.onInk, 22.dp, playing) }
+                            ) { PlayGlyph(Pf.onInk, 22.dp, playing) }
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Wave(id, prog, Modifier.fillMaxWidth().height(26.dp))
                                 Spacer(Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("$who  \u2022  ${voiceClock(shownMs)}", color = Ui.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text(dateFmt.format(at) + ", " + timeFmt.format(at), color = Ui.muted, fontSize = 12.sp, maxLines = 1)
+                                    Text("$who  \u2022  ${voiceClock(shownMs)}", color = Pf.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(dateFmt.format(at) + ", " + timeFmt.format(at), color = Pf.muted, fontSize = 12.sp, maxLines = 1)
                                 }
                             }
                         }
@@ -1819,20 +1899,20 @@ private fun SharedLinksList(st: LinksState, onMore: () -> Unit) {
                     Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Ui.soft),
+                        .background(Pf.soft),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(host.firstOrNull()?.uppercase() ?: "L", color = Ui.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(host.firstOrNull()?.uppercase() ?: "L", color = Pf.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(host, color = Ui.ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(host, color = Pf.ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(2.dp))
-                    Text(l.url, color = Ui.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(l.url, color = Pf.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (l.at > 0L) {
                     Spacer(Modifier.width(10.dp))
-                    Text(dateFmt.format(java.util.Date(l.at)), color = Ui.muted, fontSize = 12.sp, maxLines = 1)
+                    Text(dateFmt.format(java.util.Date(l.at)), color = Pf.muted, fontSize = 12.sp, maxLines = 1)
                 }
             }
         }
@@ -1912,7 +1992,7 @@ private fun AllMediaScreen(cid: String, meId: String, peerName: String, startTab
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Ui.bg)
+            .background(Pf.bg)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
