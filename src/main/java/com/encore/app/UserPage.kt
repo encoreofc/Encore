@@ -77,7 +77,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------
 // Encore profile. Light design: grey page, white cards, small grey section
@@ -711,6 +720,9 @@ fun UserPageScreen(
     var gifts by remember(conv.id) { mutableStateOf<List<GiftItem>?>(null) }
     var openGift by remember { mutableStateOf<GiftItem?>(null) }
     var shopOpen by remember { mutableStateOf(false) }
+    // the username sheet: open or not, and when this person took the name (0 = the server did not say)
+    var usernameSheet by remember { mutableStateOf(false) }
+    var usernameSetAt by remember(conv.id) { mutableStateOf(0L) }
     var menuOpen by remember { mutableStateOf(false) }
     // contacts: in your contacts when the caller says so or the saved list has them
     val inContacts = isContact || ContactsStore.has(peer?.id)
@@ -775,6 +787,7 @@ fun UserPageScreen(
                     val ck = if (u.isNull("cover_key")) null else u.getString("cover_key")
                     coverKey = ck
                     coverKeyCache[peer.id] = ck
+                    usernameSetAt = u.optLong("username_set_at", 0L)
                     val b0 = bio
                     val l0 = location
                     val k0 = blocked
@@ -902,21 +915,32 @@ fun UserPageScreen(
                 Badge(peer?.id, 24.sp, name = peer?.displayName)
             }
 
-            // the username sits where a phone number would be; tap copies it
+            // the username sits where a phone number would be; tap opens its sheet, press and hold copies it.
+            // The small seal beside it shows there is more behind the name; it is part of the same tap area.
             if (peer != null) {
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    "@" + peer.username,
-                    color = Pf.muted,
-                    fontSize = 15.sp,
-                    lineHeight = 20.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { copyText(appCtx, "@" + peer.username, "Username copied") }
-                        .padding(horizontal = 10.dp, vertical = 2.dp)
-                )
+                        .combinedClickable(
+                            onClick = { usernameSheet = true },
+                            onLongClick = { copyText(appCtx, "@" + peer.username, "Username copied") }
+                        )
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "@" + peer.username,
+                        color = Pf.muted,
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    UsernameSeal(Pf.muted, 15.dp)
+                }
             }
 
             // a blocked person is always one tap from being unblocked
@@ -1206,6 +1230,15 @@ fun UserPageScreen(
             displayName = peer.displayName,
             onDismiss = { contactSheet = false }
         )
+    }
+
+    if (usernameSheet && peer != null) {
+        UsernameSheet(
+            peer.id,
+            peer.username,
+            ContactsStore.nameFor(peer.id, peer.displayName),
+            usernameSetAt
+        ) { usernameSheet = false }
     }
 
     if (muteDialog) {
@@ -2029,4 +2062,201 @@ private fun AllMediaScreen(cid: String, meId: String, peerName: String, startTab
 
     viewImage?.let { ImageViewer(cid, it) { viewImage = null } }
     viewVideo?.let { VideoPlayerDialog(cid, it) { viewVideo = null } }
+}
+
+// ---------------------------------------------------------------------------
+// Username sheet: tap on @username opens it
+// ---------------------------------------------------------------------------
+
+/**
+ * The seal beside a username: a rounded diamond with a dot in the middle. Drawn by hand like the other glyphs,
+ * so it needs no icon library and looks the same on every phone.
+ */
+@Composable
+private fun UsernameSeal(color: Color, size: Dp = 15.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val sw = w * 0.1f
+        rotate(degrees = 45f, pivot = center) {
+            drawRoundRect(
+                color,
+                topLeft = Offset(w * 0.2f, w * 0.2f),
+                size = Size(w * 0.6f, w * 0.6f),
+                cornerRadius = CornerRadius(w * 0.16f),
+                style = Stroke(width = sw, join = StrokeJoin.Round)
+            )
+        }
+        drawCircle(color, radius = w * 0.085f, center = Offset(w / 2f, w / 2f))
+    }
+}
+
+private fun usernameDate(ms: Long): String =
+    java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(ms))
+
+/** Frosted look: a see-through tint with a thin light edge. */
+private fun Modifier.frosted(shape: Shape, tint: Color, edge: Color): Modifier =
+    this
+        .clip(shape)
+        .background(tint)
+        .border(1.dp, edge, shape)
+
+@Composable
+private fun UsernameInfoRow(label: String, divider: Boolean, value: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, color = Pf.muted, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            value()
+        }
+        if (divider) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 18.dp)
+                    .fillMaxWidth()
+                    .height(Dp.Hairline)
+                    .background(Pf.muted.copy(alpha = 0.25f))
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UsernameSheet(
+    userId: String,
+    username: String,
+    displayName: String,
+    setAt: Long,
+    onDismiss: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // the @ turns once and settles; tapping it turns it again
+    val spin = remember { Animatable(0f) }
+    val pop = remember { Animatable(0.6f) }
+    LaunchedEffect(Unit) {
+        launch {
+            pop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
+        }
+        spin.animateTo(360f, tween(900, easing = FastOutSlowInEasing))
+    }
+
+    val tint = Pf.ink.copy(alpha = 0.06f)
+    val edge = Pf.ink.copy(alpha = 0.10f)
+    val glow = Pf.ink.copy(alpha = 0.16f)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Pf.sheet.copy(alpha = 0.88f),
+        tonalElevation = 0.dp,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp)
+                .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // the @ with a soft glow behind it
+            Box(
+                Modifier
+                    .size(104.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        scope.launch {
+                            spin.snapTo(0f)
+                            spin.animateTo(360f, tween(900, easing = FastOutSlowInEasing))
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawCircle(
+                        brush = Brush.radialGradient(listOf(glow, Color.Transparent)),
+                        radius = size.minDimension / 2f
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(76.dp)
+                        .graphicsLayer {
+                            rotationZ = spin.value
+                            scaleX = pop.value
+                            scaleY = pop.value
+                        }
+                        .frosted(CircleShape, tint, edge),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("@", color = Pf.ink, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "@$username",
+                color = Pf.ink,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.3).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(Modifier.height(20.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .frosted(RoundedCornerShape(20.dp), tint, edge)
+            ) {
+                UsernameInfoRow("Owner", setAt > 0L) {
+                    Avatar(userId, displayName, 28.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.widthIn(max = 170.dp)) {
+                        Text(
+                            displayName,
+                            color = Pf.ink,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Badge(userId, 16.sp, name = displayName)
+                }
+                // only shown when the server knows it; nothing is guessed
+                if (setAt > 0L) {
+                    UsernameInfoRow("Since", false) {
+                        Text(
+                            usernameDate(setAt),
+                            color = Pf.ink,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .frosted(RoundedCornerShape(26.dp), Pf.ink.copy(alpha = 0.10f), edge)
+                    .clickable { shareProfile(ctx, displayName, username) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Share link", color = Pf.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
 }
