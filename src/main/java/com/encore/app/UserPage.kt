@@ -9,10 +9,6 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -100,8 +96,8 @@ import kotlinx.coroutines.flow.first
 // ---------------------------------------------------------------------------
 // Encore profile. Page follows the reference design: back arrow on the left,
 // call / video / starred on the right, round photo, name, @username, four
-// tiles, one settings card, Shared Media with "See All", Security & Privacy
-// below, and the gifts at the bottom. Page margin is 24dp everywhere.
+// tiles, then flat full-width sections: bio, settings, Shared Media with
+// "See All", Security & Privacy. The tiles keep a 24dp page margin.
 // ---------------------------------------------------------------------------
 
 /**
@@ -309,9 +305,6 @@ private fun groupByMonth(items: List<MsgItem>): List<Cell> {
     return out
 }
 
-// the last known background picture of each person, so a page does not jump when it opens again
-private val coverKeyCache = HashMap<String, String?>()
-
 // ---------------------------------------------------------------------------
 // Glyphs (drawn by hand, no extra icon library)
 // ---------------------------------------------------------------------------
@@ -412,7 +405,8 @@ private fun PaletteGlyph(color: Color, size: Dp = 24.dp) {
 
 /** Speaker with two sound waves. */
 @Composable
-private fun SpeakerGlyph(color: Color, size: Dp = 24.dp) {
+private fun SpeakerGlyph(color: Color, size: Dp = 24.dp, muted: Boolean = false) {
+    val gap = Pf.card
     Canvas(Modifier.size(size)) {
         val w = this.size.width
         val sw = w * 0.08f
@@ -444,6 +438,11 @@ private fun SpeakerGlyph(color: Color, size: Dp = 24.dp) {
             size = Size(w * 0.68f, w * 0.68f),
             style = Stroke(width = sw, cap = StrokeCap.Round)
         )
+        if (muted) {
+            // a slash with a small gap in the card colour, like the bell on the Mute tile
+            drawLine(gap, Offset(w * 0.14f, w * 0.14f), Offset(w * 0.86f, w * 0.86f), strokeWidth = sw * 2.6f, cap = StrokeCap.Round)
+            drawLine(color, Offset(w * 0.14f, w * 0.14f), Offset(w * 0.86f, w * 0.86f), strokeWidth = sw, cap = StrokeCap.Round)
+        }
     }
 }
 
@@ -551,30 +550,30 @@ private fun BarButton(chip: Color, onClick: () -> Unit, content: @Composable () 
     }
 }
 
-/** A grey heading above a card, lined up with the card's edge, with an optional action on the right. */
+/**
+ * A grey heading at the top of a section, with an optional action on the right. It sits on the same
+ * full-width band as the [PfCard] under it, so the two read as one section.
+ */
 @Composable
 private fun SectionHead(text: String, action: String? = null, onAction: () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 12.dp),
+            .background(Pf.card)
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text,
             color = Pf.muted,
-            fontSize = 16.sp,
-            lineHeight = 20.sp,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f)
         )
         if (action != null) {
             Text(
                 action,
                 color = Pf.ink,
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .clickable(onClick = onAction)
@@ -584,14 +583,18 @@ private fun SectionHead(text: String, action: String? = null, onAction: () -> Un
     }
 }
 
-/** The rounded card a section sits on (24dp from both screen edges). */
+/** The grey strip between two sections: the page colour shows through. */
+@Composable
+private fun SectionGap() {
+    Spacer(Modifier.height(12.dp))
+}
+
+/** A section of the page: one flat band, edge to edge, no rounded corners and no side margin. */
 @Composable
 private fun PfCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
-            .padding(horizontal = 24.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
             .background(Pf.card),
         content = content
     )
@@ -626,9 +629,9 @@ private fun GlassRow(
         ) {
             Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
             Spacer(Modifier.width(18.5.dp))
-            Text(label, color = labelColor, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(label, color = labelColor, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (!value.isNullOrEmpty()) {
-                Text(value, color = Pf.muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
+                Text(value, color = Pf.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
                 Spacer(Modifier.width(2.dp))
             }
             if (trailing != null) {
@@ -652,6 +655,32 @@ private fun GlassRow(
             )
         }
     }
+}
+
+/**
+ * The bio: plain text in the same size as the rows below it, no box and no heading. At most three lines;
+ * if it is longer it ends with "..." and a tap opens the rest (another tap folds it). Press and hold copies it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BioCard(text: String, onCopy: () -> Unit) {
+    var open by remember(text) { mutableStateOf(false) }
+    var cut by remember(text) { mutableStateOf(false) }
+    Text(
+        text,
+        color = Pf.ink,
+        style = MaterialTheme.typography.bodyLarge,
+        maxLines = if (open) Int.MAX_VALUE else 3,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = { if (!open) cut = it.hasVisualOverflow },
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = { if (cut || open) open = !open },
+                onLongClick = onCopy
+            )
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    )
 }
 
 @Composable
@@ -789,7 +818,7 @@ fun UserPageScreen(
     onMedia: () -> Unit,
     // true when this person is in your contacts
     isContact: Boolean = false,
-    // called after a gift was sent from this page
+    // not used any more (there are no gifts on this page); kept so existing callers still compile
     onSendGift: () -> Unit = {}
 ) {
     val peer = conv.peer
@@ -810,10 +839,6 @@ fun UserPageScreen(
     var photoUrl by remember { mutableStateOf<String?>(null) }
     var avatarBox by remember { mutableStateOf<Rect?>(null) }
     val soon = remember { SoonState() }
-    // gifts: null while loading, empty when the person has none
-    var gifts by remember(conv.id) { mutableStateOf<List<GiftItem>?>(null) }
-    var openGift by remember { mutableStateOf<GiftItem?>(null) }
-    var shopOpen by remember { mutableStateOf(false) }
     // the username sheet: open or not, and when this person took the name (0 = the server did not say)
     var usernameSheet by remember { mutableStateOf(false) }
     var usernameSetAt by remember(conv.id) { mutableStateOf(0L) }
@@ -821,16 +846,12 @@ fun UserPageScreen(
     val inContacts = isContact || ContactsStore.has(peer?.id)
     var contactSheet by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
-    val giftName = peer?.displayName?.trim()?.substringBefore(' ').orEmpty()
-    // the profile background picture
-    var coverKey by remember(conv.id) { mutableStateOf(peer?.let { coverKeyCache[it.id] }) }
     // the All Media page (Media / Files / Voice / Links); null while closed, else the tab to open
     var allTab by remember(conv.id) { mutableStateOf<String?>(null) }
     var allCount by remember(conv.id) { mutableStateOf<Int?>(null) }
     // the first few photos / videos shown under "Shared Media" (null while loading)
     var peek by remember(conv.id) { mutableStateOf<List<MsgItem>?>(null) }
     var starredOpen by remember { mutableStateOf(false) }
-    var bioMenu by remember { mutableStateOf(false) }
     var muteDialog by remember { mutableStateOf(false) }
     var ttlDialog by remember { mutableStateOf(false) }
     var noteDialog by remember { mutableStateOf(false) }
@@ -877,9 +898,6 @@ fun UserPageScreen(
                     bio = if (u.isNull("bio")) null else u.getString("bio")
                     location = if (u.isNull("location")) null else u.getString("location")
                     blocked = u.optBoolean("blocked")
-                    val ck = if (u.isNull("cover_key")) null else u.getString("cover_key")
-                    coverKey = ck
-                    coverKeyCache[peer.id] = ck
                     usernameSetAt = u.optLong("username_set_at", 0L)
                     val b0 = bio
                     val l0 = location
@@ -892,9 +910,6 @@ fun UserPageScreen(
                 }
             }
             runIo({ StoriesApi.userGroup(peer) }) { r -> r.onSuccess { group = it } }
-            runIo({ GiftsApi.received(peer.id) }) { r ->
-                r.onSuccess { gifts = it }.onFailure { gifts = emptyList() }
-            }
             // the total and the first few thumbnails: the All Media page loads its own pages when it is opened
             runIo({ fetchShared(conv.id, TAB_MEDIA, null, 6) }) { r ->
                 r.onSuccess { p ->
@@ -950,13 +965,8 @@ fun UserPageScreen(
             .fillMaxSize()
             .background(Pf.bg)
     ) {
-        // the background picture sits behind the top of the page and scrolls away with it
-        val coverNow = coverKey
-        if (coverNow != null && peer != null) {
-            CoverBackdrop(coverUrl(peer.id, coverNow), Modifier.offset { IntOffset(0, -scroll.value) })
-        }
-        // soft round plates behind the back arrow and the top buttons when a picture is behind them
-        val chip = if (coverNow != null) Pf.bg.copy(alpha = 0.55f) else Color.Transparent
+        // no plate behind the back arrow and the top buttons (there is no background picture any more)
+        val chip = Color.Transparent
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -999,15 +1009,12 @@ fun UserPageScreen(
                 Text(
                     ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
                     color = Pf.ink,
-                    fontSize = 24.sp,
-                    lineHeight = 30.sp,
-                    letterSpacing = (-0.3).sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                Badge(peer?.id, 24.sp, name = peer?.displayName)
+                Badge(peer?.id, 22.sp, name = peer?.displayName)
             }
 
             // the username sits where a phone number would be; tap opens its sheet, press and hold copies it
@@ -1026,8 +1033,7 @@ fun UserPageScreen(
                     Text(
                         "@" + peer.username,
                         color = Pf.muted,
-                        fontSize = 15.sp,
-                        lineHeight = 20.sp,
+                        style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -1047,7 +1053,7 @@ fun UserPageScreen(
                         .padding(start = 18.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("You blocked this user", color = Pf.ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text("You blocked this user", color = Pf.ink, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = { blockTap() }) { Text("Unblock", color = Pf.ink, fontWeight = FontWeight.SemiBold) }
                 }
             }
@@ -1082,51 +1088,17 @@ fun UserPageScreen(
             }
 
             if (peer != null) {
-                // Bio: its own small section, only when there is one. Press and hold: a Copy button
-                val b = bio
-                if (!b.isNullOrBlank()) {
-                    SectionHead("Bio")
-                    PfCard {
-                        Box(Modifier.combinedClickable(onClick = {}, onLongClick = { bioMenu = true })) {
-                            Text(
-                                b,
-                                color = Pf.ink,
-                                fontSize = 16.sp,
-                                lineHeight = 22.sp,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp)
-                            )
-                            DropdownMenu(
-                                expanded = bioMenu,
-                                onDismissRequest = { bioMenu = false },
-                                containerColor = Pf.sheet,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                MenuRow("Copy", { bioMenu = false; copyText(appCtx, b, "Bio copied") }) { CopyGlyph(Pf.ink) }
-                            }
-                        }
-                    }
-                }
-
-                val loc = location
-                if (!loc.isNullOrBlank()) {
-                    SectionHead("Location")
-                    PfCard {
-                        Text(
-                            loc,
-                            color = Pf.ink,
-                            fontSize = 16.sp,
-                            lineHeight = 22.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp)
-                        )
-                    }
-                }
-
-                // the settings card: theme, sounds, timer, private note
+                // the sections below are flat bands, edge to edge; the grey page shows between them
                 Spacer(Modifier.height(24.dp))
+
+                // the bio, right under the tiles; only when there is one (location is kept for the cache, not shown)
+                val bioNow = bio?.takeIf { it.isNotBlank() }
+                if (bioNow != null) {
+                    PfCard { BioCard(bioNow) { copyText(appCtx, bioNow, "Bio copied") } }
+                    SectionGap()
+                }
+
+                // settings: theme, sounds, timer, private note
                 PfCard {
                     GlassRow(
                         "Chat Theme", null, { soon.show("Chat themes") }, true,
@@ -1139,8 +1111,8 @@ fun UserPageScreen(
                             )
                         }
                     ) { PaletteGlyph(Pf.ink) }
-                    GlassRow("Sounds & Notifications", if (muted) "Muted" else null, { if (muted) unmute() else muteDialog = true }, true) {
-                        SpeakerGlyph(Pf.ink)
+                    GlassRow("Sounds & Notifications", null, { if (muted) unmute() else muteDialog = true }, true) {
+                        SpeakerGlyph(Pf.ink, muted = muted)
                     }
                     GlassRow("Disappearing messages", ttlLabel(ttl), { ttlDialog = true }, true) { TimerGlyph(Pf.ink) }
                     GlassRow("Private note", if (note.isBlank()) "Add" else note.replace('\n', ' '), { noteDialog = true }, false) {
@@ -1149,6 +1121,7 @@ fun UserPageScreen(
                 }
 
                 // Shared Media: three thumbnails, "See All" opens the page with Media / Files / Voice / Links
+                SectionGap()
                 val total = allCount ?: 0
                 SectionHead("Shared Media", "See All") { allTab = TAB_MEDIA }
                 val pk = peek
@@ -1197,6 +1170,7 @@ fun UserPageScreen(
                 }
 
                 // Security & Privacy
+                SectionGap()
                 SectionHead("Security & Privacy")
                 PfCard {
                     GlassRow(if (blocked) "Unblock user" else "Block user", null, { blockTap() }, true, chevron = false) {
@@ -1209,23 +1183,17 @@ fun UserPageScreen(
 
                 // a contact can be deleted from here; the chat stays
                 if (inContacts) {
-                    Spacer(Modifier.height(14.dp))
+                    SectionGap()
                     PfCard {
                         GlassRow("Delete contact", null, { confirmRemove = true }, false, labelColor = errorColor, chevron = false) {
                             Icon(Icons.Default.Delete, contentDescription = null, tint = errorColor, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
             }
 
-            // gifts sit at the bottom of the profile
-            // 18.5dp here puts the gift tiles 24dp from the edge, in line with the cards
-            Box(Modifier.fillMaxWidth().padding(horizontal = 18.5.dp)) {
-                GiftsSection(gifts = gifts, onOpen = { openGift = it }, showHeader = true)
-            }
-            // free space under the gifts, so the floating button never covers them
-            Spacer(Modifier.height(110.dp))
+            // a little room at the bottom of the page
+            Spacer(Modifier.height(24.dp))
         }
 
         // top bar: back arrow (button centre 28dp from the left); call, video and starred on the right,
@@ -1263,16 +1231,6 @@ fun UserPageScreen(
 
         SoonToast(soon, 40.dp)
 
-        // the floating send button: always one tap away while looking at a profile
-        if (peer != null && !blocked) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 11.dp)
-            ) { GiftSendPill(giftName, onClick = { shopOpen = true }) }
-        }
-
         val shownUrl = photoUrl
         if (shownUrl != null && peer != null) {
             ProfilePhotoViewer(peer.id, peer.username, peer.displayName, shownUrl, avatarBox) { photoUrl = null }
@@ -1309,7 +1267,7 @@ fun UserPageScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(start = 20.dp, end = 20.dp, bottom = 76.dp)
+                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(if (isError) MaterialTheme.colorScheme.error else Pf.ink)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -1317,38 +1275,13 @@ fun UserPageScreen(
                 Text(
                     text,
                     color = if (isError) MaterialTheme.colorScheme.onError else Pf.onInk,
-                    fontSize = 14.sp,
-                    lineHeight = 19.sp
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
         }
     }
 
     // ----- dialogs and sheets -----
-
-    val shownGift = openGift
-    if (shownGift != null) {
-        GiftDetailSheet(
-            gift = shownGift,
-            onDismiss = { openGift = null },
-            onSendOne = {
-                openGift = null
-                shopOpen = true
-            }
-        )
-    }
-
-    if (shopOpen && peer != null) {
-        GiftShopSheet(
-            userId = peer.id,
-            peerName = giftName,
-            onDismiss = { shopOpen = false },
-            onSent = {
-                runIo({ GiftsApi.received(peer.id) }) { r -> r.onSuccess { gifts = it } }
-                onSendGift()
-            }
-        )
-    }
 
     if (contactSheet && peer != null) {
         ContactEditSheet(
@@ -1536,46 +1469,6 @@ fun UserPageScreen(
                 ) { Text("Send") }
             },
             dismissButton = { TextButton(onClick = { report = false }) { Text("Cancel") } }
-        )
-    }
-}
-
-/** The picture behind the top of a profile: softly blurred, fading into the page colour. */
-@Composable
-private fun CoverBackdrop(url: String, modifier: Modifier = Modifier) {
-    val ctx = LocalContext.current
-    val bg = Pf.bg
-    val req = remember(url) {
-        ImageRequest.Builder(ctx)
-            .data(url)
-            .addHeader("Authorization", "Bearer ${Session.token}")
-            .crossfade(true)
-            .build()
-    }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(340.dp)
-            .clipToBounds()
-    ) {
-        AsyncImage(
-            model = req,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .blur(6.dp, BlurredEdgeTreatment.Rectangle)
-        )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to bg.copy(alpha = 0.25f),
-                        0.55f to bg.copy(alpha = 0.8f),
-                        1f to bg
-                    )
-                )
         )
     }
 }
