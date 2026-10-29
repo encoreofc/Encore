@@ -166,6 +166,13 @@ private object LocalPrefs {
     fun setTtl(ctx: Context, cid: String, v: Int) { sp(ctx).edit().putInt("ttl_$cid", v).apply() }
     fun getMuteUntil(ctx: Context, cid: String): Long = sp(ctx).getLong("muteuntil_$cid", 0L)
     fun setMuteUntil(ctx: Context, cid: String, v: Long) { sp(ctx).edit().putLong("muteuntil_$cid", v).apply() }
+
+    // per chat, both on until the person turns them off. The chat screen and the media loader must read
+    // these keys ("readreceipts_<chat id>", "autodl_<chat id>") for the switches to change anything there.
+    fun getReadReceipts(ctx: Context, cid: String): Boolean = sp(ctx).getBoolean("readreceipts_$cid", true)
+    fun setReadReceipts(ctx: Context, cid: String, v: Boolean) { sp(ctx).edit().putBoolean("readreceipts_$cid", v).apply() }
+    fun getAutoDownload(ctx: Context, cid: String): Boolean = sp(ctx).getBoolean("autodl_$cid", true)
+    fun setAutoDownload(ctx: Context, cid: String, v: Boolean) { sp(ctx).edit().putBoolean("autodl_$cid", v).apply() }
 }
 
 /** Raw exception text never reaches the screen. */
@@ -446,6 +453,50 @@ private fun SpeakerGlyph(color: Color, size: Dp = 24.dp, muted: Boolean = false)
     }
 }
 
+/** Two ticks: a message that was read. */
+@Composable
+private fun ReadGlyph(color: Color, size: Dp = 24.dp) {
+    Canvas(Modifier.size(size)) {
+        val u = this.size.width / 24f
+        val st = Stroke(width = u * 1.9f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        val first = Path().apply {
+            moveTo(u * 2.5f, u * 12.5f)
+            lineTo(u * 7f, u * 17f)
+            lineTo(u * 15.5f, u * 8f)
+        }
+        val second = Path().apply {
+            moveTo(u * 10.6f, u * 15.4f)
+            lineTo(u * 12.2f, u * 17f)
+            lineTo(u * 21.5f, u * 7.7f)
+        }
+        drawPath(first, color, style = st)
+        drawPath(second, color, style = st)
+    }
+}
+
+/** An arrow going down into a tray: something saved to the phone. */
+@Composable
+private fun DownloadGlyph(color: Color, size: Dp = 24.dp) {
+    Canvas(Modifier.size(size)) {
+        val u = this.size.width / 24f
+        val st = Stroke(width = u * 1.9f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawLine(color, Offset(u * 12f, u * 3.5f), Offset(u * 12f, u * 14.5f), strokeWidth = u * 1.9f, cap = StrokeCap.Round)
+        val head = Path().apply {
+            moveTo(u * 7.5f, u * 10.2f)
+            lineTo(u * 12f, u * 14.7f)
+            lineTo(u * 16.5f, u * 10.2f)
+        }
+        val tray = Path().apply {
+            moveTo(u * 4.5f, u * 15.5f)
+            lineTo(u * 4.5f, u * 19.5f)
+            lineTo(u * 19.5f, u * 19.5f)
+            lineTo(u * 19.5f, u * 15.5f)
+        }
+        drawPath(head, color, style = st)
+        drawPath(tray, color, style = st)
+    }
+}
+
 // circle with a slash, drawn by hand
 @Composable
 private fun BlockGlyph(color: Color) {
@@ -491,7 +542,8 @@ private fun PlayGlyph(color: Color, boxSize: Dp, playing: Boolean = false) {
 @Composable
 private fun MuteGlyph(muted: Boolean) {
     val ink = Pf.ink
-    val soft = Pf.card
+    // the tile sits on the band, so it is filled with the page colour; the gap must match it
+    val soft = Pf.bg
     Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
         Icon(Icons.Default.Notifications, contentDescription = null, tint = ink, modifier = Modifier.size(24.dp))
         if (muted) {
@@ -509,19 +561,28 @@ private fun MuteGlyph(muted: Boolean) {
 // Profile building blocks
 // ---------------------------------------------------------------------------
 
-/** One action under the name: a tile, 68dp tall. Four of them share the row (about 80dp wide, 9dp apart). */
+/**
+ * One action under the name: an oval button, 52dp tall, with the icon in it and the name under it.
+ * Four of them share the row (9dp apart). A tap anywhere on the button or its name counts.
+ */
 @Composable
 private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
     Column(
         modifier = modifier
-            .height(68.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Pf.card)
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(10.dp))
-        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(CircleShape)
+                .background(Pf.bg),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             label,
@@ -601,8 +662,9 @@ private fun PfCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /**
- * A row of a card, 57dp tall: icon, label, optional value, optional [trailing] piece (like the theme dot),
- * and an arrow. Rows that do something right away (block, report, delete) turn the arrow off with [chevron].
+ * A row of a card, at least 57dp tall: icon, label, optional grey [subtitle] under the label, optional value,
+ * optional [trailing] piece (like the theme dot or a switch), and an arrow. Rows that do something right away
+ * (block, report, delete) or hold a switch turn the arrow off with [chevron].
  */
 @Composable
 private fun GlassRow(
@@ -613,6 +675,7 @@ private fun GlassRow(
     labelColor: Color = Pf.ink,
     trailing: (@Composable () -> Unit)? = null,
     chevron: Boolean = true,
+    subtitle: String? = null,
     icon: @Composable () -> Unit
 ) {
     Box(
@@ -623,13 +686,18 @@ private fun GlassRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(57.dp)
-                .padding(start = 15.dp, end = 12.dp),
+                .heightIn(min = 57.dp)
+                .padding(start = 15.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
             Spacer(Modifier.width(18.5.dp))
-            Text(label, color = labelColor, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(label, color = labelColor, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle != null) {
+                    Text(subtitle, color = Pf.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
             if (!value.isNullOrEmpty()) {
                 Text(value, color = Pf.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
                 Spacer(Modifier.width(2.dp))
@@ -655,6 +723,23 @@ private fun GlassRow(
             )
         }
     }
+}
+
+/** The on/off switch at the end of a row. The row itself is the button, so the switch only shows the state. */
+@Composable
+private fun PfSwitch(on: Boolean) {
+    Switch(
+        checked = on,
+        onCheckedChange = null,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = Pf.onInk,
+            checkedTrackColor = Pf.ink,
+            checkedBorderColor = Pf.ink,
+            uncheckedThumbColor = Pf.muted,
+            uncheckedTrackColor = Color.Transparent,
+            uncheckedBorderColor = Pf.muted
+        )
+    )
 }
 
 /**
@@ -857,6 +942,8 @@ fun UserPageScreen(
     var noteDialog by remember { mutableStateOf(false) }
     var note by remember(conv.id) { mutableStateOf(peer?.let { LocalPrefs.getNote(appCtx, it.id) } ?: "") }
     var ttl by remember(conv.id) { mutableStateOf(LocalPrefs.getTtl(appCtx, conv.id)) }
+    var readReceipts by remember(conv.id) { mutableStateOf(LocalPrefs.getReadReceipts(appCtx, conv.id)) }
+    var autoDownload by remember(conv.id) { mutableStateOf(LocalPrefs.getAutoDownload(appCtx, conv.id)) }
     val scroll = rememberScrollState()
 
     fun say(t: String, error: Boolean = true) {
@@ -977,119 +1064,130 @@ fun UserPageScreen(
             val avatarNow = peer?.let { Avatars.url(it.id) }
             val story = group
 
-            // the round photo: its top sits 72dp under the status bar (45dp under the middle of the top buttons)
-            Box(
+            // photo, name, username and the four tiles share one band with the sections below,
+            // so the whole page reads as one surface (only the grey strips divide it)
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(top = 72.dp),
-                contentAlignment = Alignment.Center
+                    .background(Pf.card),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                HeroAvatar(
-                    id = peer?.id ?: conv.id,
-                    name = peer?.displayName ?: "?",
-                    url = avatarNow,
-                    isVideo = peer != null && Avatars.isVideo(peer.id),
-                    hasStory = story != null,
-                    onClick = {
-                        if (story != null) onStories(listOf(story), 0, -1)
-                        else if (avatarNow != null) photoUrl = avatarNow
-                    },
-                    onLongClick = { if (avatarNow != null) photoUrl = avatarNow },
-                    onBounds = { avatarBox = it }
-                )
-            }
-
-            // name: its middle is 30dp under the photo
-            Spacer(Modifier.height(15.dp))
-            Row(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
-                    color = Pf.ink,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Badge(peer?.id, 22.sp, name = peer?.displayName)
-            }
-
-            // the username sits where a phone number would be; tap opens its sheet, press and hold copies it
-            if (peer != null) {
-                Spacer(Modifier.height(3.dp))
-                Row(
+                // the round photo: its top sits 72dp under the status bar (45dp under the middle of the top buttons)
+                Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .combinedClickable(
-                            onClick = { usernameSheet = true },
-                            onLongClick = { copyText(appCtx, "@" + peer.username, "Username copied") }
-                        )
-                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 72.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HeroAvatar(
+                        id = peer?.id ?: conv.id,
+                        name = peer?.displayName ?: "?",
+                        url = avatarNow,
+                        isVideo = peer != null && Avatars.isVideo(peer.id),
+                        hasStory = story != null,
+                        onClick = {
+                            if (story != null) onStories(listOf(story), 0, -1)
+                            else if (avatarNow != null) photoUrl = avatarNow
+                        },
+                        onLongClick = { if (avatarNow != null) photoUrl = avatarNow },
+                        onBounds = { avatarBox = it }
+                    )
+                }
+
+                // name: its middle is 30dp under the photo
+                Spacer(Modifier.height(15.dp))
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "@" + peer.username,
-                        color = Pf.muted,
-                        style = MaterialTheme.typography.bodyLarge,
+                        ContactsStore.nameFor(peer?.id, peer?.displayName ?: "Unknown"),
+                        color = Pf.ink,
+                        style = MaterialTheme.typography.titleLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    Badge(peer?.id, 22.sp, name = peer?.displayName)
                 }
-            }
 
-            // a blocked person is always one tap from being unblocked
-            if (blocked && peer != null) {
-                Spacer(Modifier.height(12.dp))
+                // the username sits where a phone number would be; tap opens its sheet, press and hold copies it
+                if (peer != null) {
+                    Spacer(Modifier.height(3.dp))
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .combinedClickable(
+                                onClick = { usernameSheet = true },
+                                onLongClick = { copyText(appCtx, "@" + peer.username, "Username copied") }
+                            )
+                            .padding(horizontal = 10.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "@" + peer.username,
+                            color = Pf.muted,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+                }
+
+                // a blocked person is always one tap from being unblocked
+                if (blocked && peer != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier
+                            .padding(horizontal = 24.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Pf.bg)
+                            .padding(start = 18.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("You blocked this user", color = Pf.ink, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { blockTap() }) { Text("Unblock", color = Pf.ink, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+
+                // the four tiles
+                Spacer(Modifier.height(16.dp))
                 Row(
-                    Modifier
-                        .padding(horizontal = 24.dp)
+                    modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Pf.card)
-                        .padding(start = 18.dp, end = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
-                    Text("You blocked this user", color = Pf.ink, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { blockTap() }) { Text("Unblock", color = Pf.ink, fontWeight = FontWeight.SemiBold) }
+                    ActionTile("Contact", { if (peer != null) contactSheet = true }, Modifier.weight(1f)) {
+                        Icon(
+                            if (inContacts) Icons.Default.Edit else Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Pf.ink,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    ActionTile(
+                        "Share",
+                        { if (peer != null) shareProfile(ctx, ContactsStore.nameFor(peer.id, peer.displayName), peer.username) },
+                        Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
+                    }
+                    ActionTile(if (muted) "Unmute" else "Mute", { if (muted) unmute() else muteDialog = true }, Modifier.weight(1f)) { MuteGlyph(muted) }
+                    ActionTile("Search", onSearch, Modifier.weight(1f)) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
+                    }
                 }
-            }
 
-            // the four tiles
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                ActionTile("Contact", { if (peer != null) contactSheet = true }, Modifier.weight(1f)) {
-                    Icon(
-                        if (inContacts) Icons.Default.Edit else Icons.Default.Add,
-                        contentDescription = null,
-                        tint = Pf.ink,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                ActionTile(
-                    "Share",
-                    { if (peer != null) shareProfile(ctx, ContactsStore.nameFor(peer.id, peer.displayName), peer.username) },
-                    Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                }
-                ActionTile(if (muted) "Unmute" else "Mute", { if (muted) unmute() else muteDialog = true }, Modifier.weight(1f)) { MuteGlyph(muted) }
-                ActionTile("Search", onSearch, Modifier.weight(1f)) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                }
+                Spacer(Modifier.height(16.dp))
             }
 
             if (peer != null) {
                 // the sections below are flat bands, edge to edge; the grey page shows between them
-                Spacer(Modifier.height(24.dp))
+                SectionGap()
 
                 // the bio, right under the tiles; only when there is one (location is kept for the cache, not shown)
                 val bioNow = bio?.takeIf { it.isNotBlank() }
@@ -1115,9 +1213,33 @@ fun UserPageScreen(
                         SpeakerGlyph(Pf.ink, muted = muted)
                     }
                     GlassRow("Disappearing messages", ttlLabel(ttl), { ttlDialog = true }, true) { TimerGlyph(Pf.ink) }
-                    GlassRow("Private note", if (note.isBlank()) "Add" else note.replace('\n', ' '), { noteDialog = true }, false) {
+                    GlassRow("Private note", if (note.isBlank()) "Add" else note.replace('\n', ' '), { noteDialog = true }, true) {
                         Icon(Icons.Default.Lock, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                     }
+                    GlassRow(
+                        "Read receipts", null,
+                        {
+                            readReceipts = !readReceipts
+                            // TODO: send to the server; for now it is saved on this device only
+                            LocalPrefs.setReadReceipts(appCtx, conv.id, readReceipts)
+                        },
+                        true,
+                        trailing = { PfSwitch(readReceipts) },
+                        chevron = false,
+                        subtitle = "Let them see when you have read their messages"
+                    ) { ReadGlyph(Pf.ink) }
+                    GlassRow(
+                        "Auto-download", null,
+                        {
+                            autoDownload = !autoDownload
+                            // TODO: send to the server; for now it is saved on this device only
+                            LocalPrefs.setAutoDownload(appCtx, conv.id, autoDownload)
+                        },
+                        false,
+                        trailing = { PfSwitch(autoDownload) },
+                        chevron = false,
+                        subtitle = "Download photos and videos in this chat automatically"
+                    ) { DownloadGlyph(Pf.ink) }
                 }
 
                 // Shared Media: three thumbnails, "See All" opens the page with Media / Files / Voice / Links
@@ -2279,31 +2401,4 @@ private fun UsernameSheet(
                     Badge(userId, 16.sp, name = displayName)
                 }
                 // only shown when the server knows it; nothing is guessed
-                if (setAt > 0L) {
-                    UsernameInfoRow("Since", false) {
-                        Text(
-                            usernameDate(setAt),
-                            color = Pf.ink,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(Pf.soft)
-                    .clickable { shareProfile(ctx, displayName, username) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Share link", color = Pf.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
+                if 
