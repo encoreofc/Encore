@@ -915,8 +915,7 @@ fun UserPageScreen(
                 Badge(peer?.id, 24.sp, name = peer?.displayName)
             }
 
-            // the username sits where a phone number would be; tap opens its sheet, press and hold copies it.
-            // The small seal beside it shows there is more behind the name; it is part of the same tap area.
+            // the username sits where a phone number would be; tap opens its sheet, press and hold copies it
             if (peer != null) {
                 Spacer(Modifier.height(2.dp))
                 Row(
@@ -938,8 +937,6 @@ fun UserPageScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(Modifier.width(6.dp))
-                    UsernameSeal(Pf.muted, 15.dp)
                 }
             }
 
@@ -2068,37 +2065,8 @@ private fun AllMediaScreen(cid: String, meId: String, peerName: String, startTab
 // Username sheet: tap on @username opens it
 // ---------------------------------------------------------------------------
 
-/**
- * The seal beside a username: a rounded diamond with a dot in the middle. Drawn by hand like the other glyphs,
- * so it needs no icon library and looks the same on every phone.
- */
-@Composable
-private fun UsernameSeal(color: Color, size: Dp = 15.dp) {
-    Canvas(Modifier.size(size)) {
-        val w = this.size.width
-        val sw = w * 0.1f
-        rotate(degrees = 45f, pivot = center) {
-            drawRoundRect(
-                color,
-                topLeft = Offset(w * 0.2f, w * 0.2f),
-                size = Size(w * 0.6f, w * 0.6f),
-                cornerRadius = CornerRadius(w * 0.16f),
-                style = Stroke(width = sw, join = StrokeJoin.Round)
-            )
-        }
-        drawCircle(color, radius = w * 0.085f, center = Offset(w / 2f, w / 2f))
-    }
-}
-
 private fun usernameDate(ms: Long): String =
     java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(ms))
-
-/** Frosted look: a see-through tint with a thin light edge. */
-private fun Modifier.frosted(shape: Shape, tint: Color, edge: Color): Modifier =
-    this
-        .clip(shape)
-        .background(tint)
-        .border(1.dp, edge, shape)
 
 @Composable
 private fun UsernameInfoRow(label: String, divider: Boolean, value: @Composable () -> Unit) {
@@ -2147,13 +2115,11 @@ private fun UsernameSheet(
         spin.animateTo(360f, tween(900, easing = FastOutSlowInEasing))
     }
 
-    val tint = Pf.ink.copy(alpha = 0.06f)
-    val edge = Pf.ink.copy(alpha = 0.10f)
     val glow = Pf.ink.copy(alpha = 0.16f)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Pf.sheet.copy(alpha = 0.88f),
+        containerColor = Pf.sheet,
         tonalElevation = 0.dp,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2193,7 +2159,8 @@ private fun UsernameSheet(
                             scaleX = pop.value
                             scaleY = pop.value
                         }
-                        .frosted(CircleShape, tint, edge),
+                        .clip(CircleShape)
+                        .background(Pf.soft),
                     contentAlignment = Alignment.Center
                 ) {
                     Text("@", color = Pf.ink, fontSize = 36.sp, fontWeight = FontWeight.Bold)
@@ -2215,7 +2182,8 @@ private fun UsernameSheet(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .frosted(RoundedCornerShape(20.dp), tint, edge)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Pf.soft)
             ) {
                 UsernameInfoRow("Owner", setAt > 0L) {
                     Avatar(userId, displayName, 28.dp)
@@ -2251,7 +2219,8 @@ private fun UsernameSheet(
                 Modifier
                     .fillMaxWidth()
                     .height(52.dp)
-                    .frosted(RoundedCornerShape(26.dp), Pf.ink.copy(alpha = 0.10f), edge)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Pf.soft)
                     .clickable { shareProfile(ctx, displayName, username) },
                 contentAlignment = Alignment.Center
             ) {
