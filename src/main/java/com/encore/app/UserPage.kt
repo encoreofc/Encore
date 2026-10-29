@@ -98,9 +98,10 @@ import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.flow.first
 
 // ---------------------------------------------------------------------------
-// Encore profile. Light design: grey page, white cards, small grey section
-// headings. Top: round photo, name, @username, four tiles. Then Bio, Chat,
-// Shared Media, and the gifts at the bottom.
+// Encore profile. Page follows the reference design: back arrow on the left,
+// call / video / starred on the right, round photo, name, @username, four
+// tiles, one settings card, Shared Media with "See All", Security & Privacy
+// below, and the gifts at the bottom. Page margin is 24dp everywhere.
 // ---------------------------------------------------------------------------
 
 /**
@@ -139,6 +140,9 @@ private val StoryGold = listOf(
     Color(0xFFFFC400),
     Color(0xFFFFE27A)
 )
+
+// the round photo on the profile (reference design: 92dp)
+private val ProfileAvatarSize = 92.dp
 
 private const val TAB_MEDIA = "media"
 private const val TAB_FILES = "files"
@@ -391,6 +395,58 @@ private fun TimerGlyph(color: Color, size: Dp = 24.dp) {
     }
 }
 
+/** Paint palette: a round outline, four colour dots and a small thumb hole. */
+@Composable
+private fun PaletteGlyph(color: Color, size: Dp = 24.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val sw = w * 0.08f
+        drawCircle(color, radius = w * 0.38f, center = Offset(w / 2f, w / 2f), style = Stroke(width = sw))
+        drawCircle(color, radius = w * 0.05f, center = Offset(w * 0.33f, w * 0.42f))
+        drawCircle(color, radius = w * 0.05f, center = Offset(w * 0.46f, w * 0.29f))
+        drawCircle(color, radius = w * 0.05f, center = Offset(w * 0.63f, w * 0.33f))
+        drawCircle(color, radius = w * 0.05f, center = Offset(w * 0.30f, w * 0.60f))
+        drawCircle(color, radius = w * 0.09f, center = Offset(w * 0.60f, w * 0.64f), style = Stroke(width = sw * 0.9f))
+    }
+}
+
+/** Speaker with two sound waves. */
+@Composable
+private fun SpeakerGlyph(color: Color, size: Dp = 24.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val sw = w * 0.08f
+        val body = Path().apply {
+            moveTo(w * 0.12f, w * 0.40f)
+            lineTo(w * 0.30f, w * 0.40f)
+            lineTo(w * 0.50f, w * 0.22f)
+            lineTo(w * 0.50f, w * 0.78f)
+            lineTo(w * 0.30f, w * 0.60f)
+            lineTo(w * 0.12f, w * 0.60f)
+            close()
+        }
+        drawPath(body, color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawArc(
+            color = color,
+            startAngle = -45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = Offset(w * 0.30f, w * 0.30f),
+            size = Size(w * 0.40f, w * 0.40f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+        drawArc(
+            color = color,
+            startAngle = -45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = Offset(w * 0.16f, w * 0.16f),
+            size = Size(w * 0.68f, w * 0.68f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
 // circle with a slash, drawn by hand
 @Composable
 private fun BlockGlyph(color: Color) {
@@ -451,15 +507,15 @@ private fun MuteGlyph(muted: Boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Profile building blocks (same look as before)
+// Profile building blocks
 // ---------------------------------------------------------------------------
 
-/** One action under the name: a white tile, 64dp tall. */
+/** One action under the name: a tile, 68dp tall. Four of them share the row (about 80dp wide, 9dp apart). */
 @Composable
 private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: @Composable () -> Unit) {
     Column(
         modifier = modifier
-            .height(64.dp)
+            .height(68.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Pf.card)
             .clickable(onClick = onClick),
@@ -467,12 +523,12 @@ private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = 
     ) {
         Spacer(Modifier.height(10.dp))
         Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             label,
             color = Pf.ink,
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -480,20 +536,35 @@ private fun ActionTile(label: String, onClick: () -> Unit, modifier: Modifier = 
     }
 }
 
-/** A small grey heading above a card (like Messenger's section titles), with an optional action on the right. */
+/** A round 45dp button of the top bar (call, video, starred). */
+@Composable
+private fun BarButton(chip: Color, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(45.dp)
+            .clip(CircleShape)
+            .background(chip)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { content() }
+    }
+}
+
+/** A grey heading above a card, lined up with the card's edge, with an optional action on the right. */
 @Composable
 private fun SectionHead(text: String, action: String? = null, onAction: () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 30.dp, end = 26.dp, top = 22.dp, bottom = 8.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text,
             color = Pf.muted,
-            fontSize = 13.sp,
-            lineHeight = 16.sp,
+            fontSize = 16.sp,
+            lineHeight = 20.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f)
         )
@@ -501,8 +572,8 @@ private fun SectionHead(text: String, action: String? = null, onAction: () -> Un
             Text(
                 action,
                 color = Pf.ink,
-                fontSize = 13.sp,
-                lineHeight = 16.sp,
+                fontSize = 16.sp,
+                lineHeight = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
@@ -513,12 +584,12 @@ private fun SectionHead(text: String, action: String? = null, onAction: () -> Un
     }
 }
 
-/** The white rounded card a section sits on. */
+/** The rounded card a section sits on (24dp from both screen edges). */
 @Composable
 private fun PfCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
-            .padding(horizontal = 14.dp)
+            .padding(horizontal = 24.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Pf.card),
@@ -526,7 +597,10 @@ private fun PfCard(content: @Composable ColumnScope.() -> Unit) {
     )
 }
 
-/** A row of a card: icon, label, optional value, arrow. */
+/**
+ * A row of a card, 57dp tall: icon, label, optional value, optional [trailing] piece (like the theme dot),
+ * and an arrow. Rows that do something right away (block, report, delete) turn the arrow off with [chevron].
+ */
 @Composable
 private fun GlassRow(
     label: String,
@@ -534,6 +608,8 @@ private fun GlassRow(
     onClick: () -> Unit,
     divider: Boolean,
     labelColor: Color = Pf.ink,
+    trailing: (@Composable () -> Unit)? = null,
+    chevron: Boolean = true,
     icon: @Composable () -> Unit
 ) {
     Box(
@@ -544,8 +620,8 @@ private fun GlassRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(50.dp)
-                .padding(start = 16.dp, end = 12.dp),
+                .height(57.dp)
+                .padding(start = 15.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { icon() }
@@ -555,13 +631,21 @@ private fun GlassRow(
                 Text(value, color = Pf.muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
                 Spacer(Modifier.width(2.dp))
             }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Pf.muted)
+            if (trailing != null) {
+                trailing()
+                Spacer(Modifier.width(4.dp))
+            }
+            if (chevron) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Pf.muted)
+            } else {
+                Spacer(Modifier.width(4.dp))
+            }
         }
         if (divider) {
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
-                    .padding(start = 58.dp)
+                    .padding(start = 57.5.dp)
                     .fillMaxWidth()
                     .height(Dp.Hairline)
                     .background(Pf.muted.copy(alpha = 0.2f))
@@ -625,7 +709,7 @@ private fun ChoiceDialog(
 }
 
 /**
- * The round photo, 112dp. With a story the photo is pulled in by 3.5dp and a golden ring is drawn around it.
+ * The round photo, 92dp. With a story the photo is pulled in by 3.5dp and a golden ring is drawn around it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -640,10 +724,10 @@ private fun HeroAvatar(
     onBounds: (Rect) -> Unit
 ) {
     val inset = if (hasStory) 3.5.dp else 0.dp
-    val photo = 112.dp - inset * 2
+    val photo = ProfileAvatarSize - inset * 2
     Box(
         modifier = Modifier
-            .size(112.dp)
+            .size(ProfileAvatarSize)
             .onGloballyPositioned { onBounds(it.boundsInRoot()) }
             .clip(CircleShape)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
@@ -711,6 +795,7 @@ fun UserPageScreen(
     val peer = conv.peer
     val ctx = LocalContext.current
     val appCtx = ctx.applicationContext
+    val errorColor = MaterialTheme.colorScheme.error
     // what was last known is used right away, so the page does not fill in piece by piece
     val cached = remember(conv.id) { peer?.let { ProfileCache.get(it.id) } }
     var bio by remember(conv.id) { mutableStateOf<String?>(cached?.bio) }
@@ -732,7 +817,6 @@ fun UserPageScreen(
     // the username sheet: open or not, and when this person took the name (0 = the server did not say)
     var usernameSheet by remember { mutableStateOf(false) }
     var usernameSetAt by remember(conv.id) { mutableStateOf(0L) }
-    var menuOpen by remember { mutableStateOf(false) }
     // contacts: in your contacts when the caller says so or the saved list has them
     val inContacts = isContact || ContactsStore.has(peer?.id)
     var contactSheet by remember { mutableStateOf(false) }
@@ -743,7 +827,7 @@ fun UserPageScreen(
     // the All Media page (Media / Files / Voice / Links); null while closed, else the tab to open
     var allTab by remember(conv.id) { mutableStateOf<String?>(null) }
     var allCount by remember(conv.id) { mutableStateOf<Int?>(null) }
-    // the first few photos / videos shown under "Shared Media"
+    // the first few photos / videos shown under "Shared Media" (null while loading)
     var peek by remember(conv.id) { mutableStateOf<List<MsgItem>?>(null) }
     var starredOpen by remember { mutableStateOf(false) }
     var bioMenu by remember { mutableStateOf(false) }
@@ -816,6 +900,8 @@ fun UserPageScreen(
                 r.onSuccess { p ->
                     allCount = p.counts.values.sum()
                     peek = p.items.take(3)
+                }.onFailure {
+                    peek = emptyList()
                 }
             }
         }
@@ -869,7 +955,7 @@ fun UserPageScreen(
         if (coverNow != null && peer != null) {
             CoverBackdrop(coverUrl(peer.id, coverNow), Modifier.offset { IntOffset(0, -scroll.value) })
         }
-        // soft round plates behind the back arrow and the three dots when a picture is behind them
+        // soft round plates behind the back arrow and the top buttons when a picture is behind them
         val chip = if (coverNow != null) Pf.bg.copy(alpha = 0.55f) else Color.Transparent
         Column(
             modifier = Modifier
@@ -881,12 +967,12 @@ fun UserPageScreen(
             val avatarNow = peer?.let { Avatars.url(it.id) }
             val story = group
 
-            // the round photo
+            // the round photo: its top sits 72dp under the status bar (45dp under the middle of the top buttons)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 40.dp),
+                    .padding(top = 72.dp),
                 contentAlignment = Alignment.Center
             ) {
                 HeroAvatar(
@@ -904,8 +990,8 @@ fun UserPageScreen(
                 )
             }
 
-            // name
-            Spacer(Modifier.height(16.dp))
+            // name: its middle is 30dp under the photo
+            Spacer(Modifier.height(15.dp))
             Row(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -926,7 +1012,7 @@ fun UserPageScreen(
 
             // the username sits where a phone number would be; tap opens its sheet, press and hold copies it
             if (peer != null) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -954,7 +1040,7 @@ fun UserPageScreen(
                 Spacer(Modifier.height(12.dp))
                 Row(
                     Modifier
-                        .padding(horizontal = 14.dp)
+                        .padding(horizontal = 24.dp)
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(Pf.card)
@@ -967,18 +1053,29 @@ fun UserPageScreen(
             }
 
             // the four tiles
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(16.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                ActionTile(if (muted) "Unmute" else "Mute", { if (muted) unmute() else muteDialog = true }, Modifier.weight(1f)) { MuteGlyph(muted) }
-                ActionTile("Audio", { soon.show("Calls") }, Modifier.weight(1f)) {
-                    Icon(Icons.Default.Call, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
+                ActionTile("Contact", { if (peer != null) contactSheet = true }, Modifier.weight(1f)) {
+                    Icon(
+                        if (inContacts) Icons.Default.Edit else Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Pf.ink,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
-                ActionTile("Video", { soon.show("Video calls") }, Modifier.weight(1f)) { VideoIcon(Pf.ink) }
+                ActionTile(
+                    "Share",
+                    { if (peer != null) shareProfile(ctx, ContactsStore.nameFor(peer.id, peer.displayName), peer.username) },
+                    Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
+                }
+                ActionTile(if (muted) "Unmute" else "Mute", { if (muted) unmute() else muteDialog = true }, Modifier.weight(1f)) { MuteGlyph(muted) }
                 ActionTile("Search", onSearch, Modifier.weight(1f)) {
                     Icon(Icons.Default.Search, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                 }
@@ -1028,49 +1125,94 @@ fun UserPageScreen(
                     }
                 }
 
-                // chat settings and personal things
-                SectionHead("Chat")
+                // the settings card: theme, sounds, timer, private note
+                Spacer(Modifier.height(24.dp))
                 PfCard {
-                    if (!inContacts) {
-                        GlassRow("Add to contacts", null, { contactSheet = true }, true) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
+                    GlassRow(
+                        "Chat Theme", null, { soon.show("Chat themes") }, true,
+                        trailing = {
+                            Box(
+                                Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(StoryGold[1])
+                            )
                         }
+                    ) { PaletteGlyph(Pf.ink) }
+                    GlassRow("Sounds & Notifications", if (muted) "Muted" else null, { if (muted) unmute() else muteDialog = true }, true) {
+                        SpeakerGlyph(Pf.ink)
                     }
                     GlassRow("Disappearing messages", ttlLabel(ttl), { ttlDialog = true }, true) { TimerGlyph(Pf.ink) }
-                    GlassRow("Starred messages", null, { starredOpen = true }, true) {
-                        Icon(Icons.Default.Star, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                    }
-                    GlassRow("Private note", if (note.isBlank()) "Add" else note.replace('\n', ' '), { noteDialog = true }, true) {
+                    GlassRow("Private note", if (note.isBlank()) "Add" else note.replace('\n', ' '), { noteDialog = true }, false) {
                         Icon(Icons.Default.Lock, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                    }
-                    GlassRow("Share profile", null, { shareProfile(ctx, ContactsStore.nameFor(peer.id, peer.displayName), peer.username) }, false) {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
                     }
                 }
 
-                // Shared Media: the first few thumbnails, "See All" opens the page with Media / Files / Voice / Links
+                // Shared Media: three thumbnails, "See All" opens the page with Media / Files / Voice / Links
                 val total = allCount ?: 0
-                if (total > 0) {
-                    SectionHead("Shared Media", "See All") { allTab = TAB_MEDIA }
-                    val pk = peek
-                    PfCard {
-                        if (!pk.isNullOrEmpty()) {
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                pk.forEach { item ->
-                                    Box(Modifier.weight(1f).aspectRatio(1.25f)) {
-                                        MediaTile(conv.id, item) { allTab = TAB_MEDIA }
-                                    }
-                                }
-                                // the tiles keep the same size when there are fewer than three
-                                repeat(3 - pk.size) { Spacer(Modifier.weight(1f)) }
+                SectionHead("Shared Media", "See All") { allTab = TAB_MEDIA }
+                val pk = peek
+                PfCard {
+                    if (pk == null) {
+                        // still loading: three quiet placeholders, so nothing jumps when the pictures arrive
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 15.dp, vertical = 17.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            repeat(3) {
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .height(75.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Pf.soft)
+                                )
                             }
-                        } else {
-                            GlassRow("Files, voice and links", total.toString(), { allTab = TAB_MEDIA }, false) { FilesGlyph(Pf.ink) }
+                        }
+                    } else if (pk.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 15.dp, vertical = 17.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            pk.forEach { item ->
+                                Box(Modifier.weight(1f).height(75.dp)) {
+                                    MediaTile(conv.id, item) { allTab = TAB_MEDIA }
+                                }
+                            }
+                            // the tiles keep the same size when there are fewer than three
+                            repeat(3 - pk.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    } else {
+                        GlassRow(
+                            "Media, files, voice and links",
+                            if (total > 0) total.toString() else null,
+                            { allTab = TAB_MEDIA },
+                            false
+                        ) { FilesGlyph(Pf.ink) }
+                    }
+                }
+
+                // Security & Privacy
+                SectionHead("Security & Privacy")
+                PfCard {
+                    GlassRow(if (blocked) "Unblock user" else "Block user", null, { blockTap() }, true, chevron = false) {
+                        BlockGlyph(Pf.ink)
+                    }
+                    GlassRow("Report", null, { report = true }, false, labelColor = errorColor, chevron = false) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = errorColor, modifier = Modifier.size(24.dp))
+                    }
+                }
+
+                // a contact can be deleted from here; the chat stays
+                if (inContacts) {
+                    Spacer(Modifier.height(14.dp))
+                    PfCard {
+                        GlassRow("Delete contact", null, { confirmRemove = true }, false, labelColor = errorColor, chevron = false) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = errorColor, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -1078,22 +1220,23 @@ fun UserPageScreen(
             }
 
             // gifts sit at the bottom of the profile
-            // 6.5dp here puts the gift tiles 12dp from the edge
-            Box(Modifier.fillMaxWidth().padding(horizontal = 6.5.dp)) {
+            // 18.5dp here puts the gift tiles 24dp from the edge, in line with the cards
+            Box(Modifier.fillMaxWidth().padding(horizontal = 18.5.dp)) {
                 GiftsSection(gifts = gifts, onOpen = { openGift = it }, showHeader = true)
             }
             // free space under the gifts, so the floating button never covers them
             Spacer(Modifier.height(110.dp))
         }
 
-        // action bar: back arrow (button centre 28dp from the left) and the three dots (centre 29.5dp from the right)
+        // top bar: back arrow (button centre 28dp from the left); call, video and starred on the right,
+        // 45dp apart, the last one centred 38dp from the right edge
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .height(56.dp)
-                .padding(start = 4.dp, end = 5.5.dp),
+                .padding(start = 4.dp, end = 15.5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -1108,44 +1251,12 @@ fun UserPageScreen(
             }
             Spacer(Modifier.weight(1f))
             if (peer != null) {
-                Box {
-                    IconButton(
-                        onClick = { menuOpen = true },
-                        modifier = Modifier.clip(CircleShape).background(chip)
-                    ) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Pf.ink)
-                    }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                        containerColor = Pf.sheet,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        MenuRow("All Media", { menuOpen = false; allTab = TAB_MEDIA }) { GalleryGlyph(Pf.ink) }
-                        MenuRow("Starred Messages", { menuOpen = false; starredOpen = true }) {
-                            Icon(Icons.Default.Star, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                        }
-                        if (!blocked) {
-                            MenuRow("Send a gift", { menuOpen = false; shopOpen = true }) { GiftGlyph(Pf.ink, 24.dp) }
-                        }
-                        if (inContacts) {
-                            MenuRow("Edit contact", { menuOpen = false; contactSheet = true }) {
-                                Icon(Icons.Default.Edit, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                            }
-                            MenuRow("Delete contact", { menuOpen = false; confirmRemove = true }, MaterialTheme.colorScheme.error) {
-                                Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
-                            }
-                        } else {
-                            MenuRow("Add to contacts", { menuOpen = false; contactSheet = true }) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = Pf.ink, modifier = Modifier.size(24.dp))
-                            }
-                        }
-                        HorizontalDivider(color = Pf.line)
-                        MenuRow(if (blocked) "Unblock user" else "Block user", { menuOpen = false; blockTap() }) { BlockGlyph(Pf.ink) }
-                        MenuRow("Report", { menuOpen = false; report = true }, MaterialTheme.colorScheme.error) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
-                        }
-                    }
+                BarButton(chip, { soon.show("Calls") }) {
+                    Icon(Icons.Default.Call, contentDescription = "Audio call", tint = Pf.ink, modifier = Modifier.size(24.dp))
+                }
+                BarButton(chip, { soon.show("Video calls") }) { VideoIcon(Pf.ink) }
+                BarButton(chip, { starredOpen = true }) {
+                    Icon(Icons.Default.Star, contentDescription = "Starred messages", tint = Pf.ink, modifier = Modifier.size(24.dp))
                 }
             }
         }
@@ -2241,12 +2352,13 @@ private fun UsernameSheet(
             }
 
             Spacer(Modifier.height(16.dp))
+            // the username: 20sp, one line, in proportion to the 80dp circle and the 15sp rows below
             Text(
                 "@$username",
                 color = Pf.ink,
-                fontSize = 24.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.3).sp,
+                letterSpacing = (-0.2).sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
