@@ -87,6 +87,15 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.flow.first
 
 // ---------------------------------------------------------------------------
 // Encore profile. Light design: grey page, white cards, small grey section
@@ -1173,6 +1182,16 @@ fun UserPageScreen(
             StarredScreen(onBack = { starredOpen = false })
         }
 
+        // the username sheet: dims the page and slides up over it
+        if (usernameSheet && peer != null) {
+            UsernameSheet(
+                peer.id,
+                peer.username,
+                ContactsStore.nameFor(peer.id, peer.displayName),
+                usernameSetAt
+            ) { usernameSheet = false }
+        }
+
         // one short message at the bottom, over everything
         toast?.let { (text, isError) ->
             Box(
@@ -1227,15 +1246,6 @@ fun UserPageScreen(
             displayName = peer.displayName,
             onDismiss = { contactSheet = false }
         )
-    }
-
-    if (usernameSheet && peer != null) {
-        UsernameSheet(
-            peer.id,
-            peer.username,
-            ContactsStore.nameFor(peer.id, peer.displayName),
-            usernameSetAt
-        ) { usernameSheet = false }
     }
 
     if (muteDialog) {
@@ -2065,6 +2075,12 @@ private fun AllMediaScreen(cid: String, meId: String, peerName: String, startTab
 // Username sheet: tap on @username opens it
 // ---------------------------------------------------------------------------
 
+// sheet look and motion: white sheet, 24dp top corners, page behind dims to 20%, opens in 400 ms, closes in 250 ms
+private val SheetOpenEase = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+private val SheetCloseEase = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+private val SheetSnapEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+private val SheetBlue = Color(0xFF229AF0)
+
 private fun usernameDate(ms: Long): String =
     java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(ms))
 
@@ -2094,7 +2110,6 @@ private fun UsernameInfoRow(label: String, divider: Boolean, value: @Composable 
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UsernameSheet(
     userId: String,
@@ -2105,38 +2120,115 @@ private fun UsernameSheet(
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val navBottom = WindowInsets.navigationBars.getBottom(density)
+    // the sheet waits and leaves this far below its place: its own height + 10dp + the navigation bar
+    val spare = with(density) { 10.dp.toPx() } + navBottom
+    // a swipe down further than this (about 0.8 cm), or a fast one, closes the sheet
+    val swipeLimit = with(density) { 50.dp.toPx() }
+
+    val offset = remember { Animatable(0f) }
+    val dim = remember { Animatable(0f) }
+    var sheetH by remember { mutableStateOf(0) }
+    var ready by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
     // the @ turns once and settles; tapping it turns it again
     val spin = remember { Animatable(0f) }
     val pop = remember { Animatable(0.6f) }
+    val tracker = remember { VelocityTracker() }
+    val dragY = remember { floatArrayOf(0f) }
+
     LaunchedEffect(Unit) {
+        val h = snapshotFlow { sheetH }.first { it > 0 }
+        offset.snapTo(h + spare)
+        ready = true
+        delay(20)
+        launch { dim.animateTo(1f, tween(400, easing = SheetOpenEase)) }
         launch {
             pop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
         }
-        spin.animateTo(360f, tween(900, easing = FastOutSlowInEasing))
+        launch { spin.animateTo(360f, tween(900, easing = FastOutSlowInEasing)) }
+        offset.animateTo(0f, tween(400, easing = SheetOpenEase))
     }
 
-    val glow = Pf.ink.copy(alpha = 0.16f)
+    fun close() {
+        if (closing) return
+        closing = true
+        scope.launch {
+            launch { dim.animateTo(0f, tween(250, easing = SheetCloseEase)) }
+            offset.animateTo(sheetH + spare, tween(250, easing = SheetCloseEase))
+            onDismiss()
+        }
+    }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Pf.sheet,
-        tonalElevation = 0.dp,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ) {
+    BackHandler(onBack = { close() })
+
+    Box(Modifier.fillMaxSize()) {
+        // the page behind, dimmed; a tap on it closes the sheet
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind { drawRect(Color.Black, alpha = 0.2f * dim.value) }
+                .pointerInput(Unit) { detectTapGestures { close() } }
+        )
+
         Column(
             Modifier
+                .align(Alignment.BottomCenter)
+                .widthIn(max = 500.dp)
                 .fillMaxWidth()
+                .onSizeChanged { sheetH = it.height }
+                .graphicsLayer {
+                    translationY = offset.value
+                    alpha = if (ready) 1f else 0f
+                }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            dragY[0] = offset.value
+                            tracker.resetTracking()
+                        },
+                        onDragEnd = {
+                            val v = tracker.calculateVelocity().y
+                            val back = (dragY[0] < swipeLimit && v < 3500f) || (v < 0f && kotlin.math.abs(v) >= 3500f)
+                            if (back) {
+                                val ms = (250f * (dragY[0] / swipeLimit)).toInt().coerceAtLeast(1)
+                                scope.launch { offset.animateTo(0f, tween(ms, easing = SheetSnapEase)) }
+                            } else {
+                                close()
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch { offset.animateTo(0f, tween(250, easing = SheetSnapEase)) }
+                        },
+                        onVerticalDrag = { change, dy ->
+                            change.consume()
+                            dragY[0] = (dragY[0] + dy).coerceAtLeast(0f)
+                            tracker.addPosition(change.uptimeMillis, Offset(0f, dragY[0]))
+                            val next = dragY[0]
+                            scope.launch { offset.snapTo(next) }
+                        }
+                    )
+                }
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Pf.sheet)
+                .padding(top = 23.dp)
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 20.dp)
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .padding(bottom = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // the @ with a soft glow behind it
+            // the @: a solid blue circle, 80dp, 23dp from the top and 16dp above what follows, with a 45dp glyph
             Box(
                 Modifier
-                    .size(104.dp)
+                    .size(80.dp)
+                    .graphicsLayer {
+                        rotationZ = spin.value
+                        scaleX = pop.value
+                        scaleY = pop.value
+                    }
                     .clip(CircleShape)
+                    .background(SheetBlue)
                     .clickable {
                         scope.launch {
                             spin.snapTo(0f)
@@ -2145,29 +2237,10 @@ private fun UsernameSheet(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    drawCircle(
-                        brush = Brush.radialGradient(listOf(glow, Color.Transparent)),
-                        radius = size.minDimension / 2f
-                    )
-                }
-                Box(
-                    Modifier
-                        .size(76.dp)
-                        .graphicsLayer {
-                            rotationZ = spin.value
-                            scaleX = pop.value
-                            scaleY = pop.value
-                        }
-                        .clip(CircleShape)
-                        .background(Pf.soft),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("@", color = Pf.ink, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                }
+                Text("@", color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Medium)
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
             Text(
                 "@$username",
                 color = Pf.ink,
