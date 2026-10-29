@@ -509,16 +509,6 @@ private fun BlockGlyph(color: Color) {
 }
 
 @Composable
-private fun CopyGlyph(color: Color) {
-    Canvas(Modifier.size(24.dp)) {
-        val w = size.width
-        val sw = w * 0.08f
-        drawRoundRect(color, Offset(w * 0.32f, w * 0.1f), Size(w * 0.56f, w * 0.62f), CornerRadius(w * 0.08f), style = Stroke(width = sw))
-        drawRoundRect(color, Offset(w * 0.12f, w * 0.28f), Size(w * 0.56f, w * 0.62f), CornerRadius(w * 0.08f), style = Stroke(width = sw))
-    }
-}
-
-@Composable
 private fun PlayGlyph(color: Color, boxSize: Dp, playing: Boolean = false) {
     Canvas(Modifier.size(boxSize)) {
         val w = size.width
@@ -2401,4 +2391,17 @@ private fun UsernameSheet(
                     Badge(userId, 16.sp, name = displayName)
                 }
                 // only shown when the server knows it; nothing is guessed
-                if 
+                if (setAt > 0L) {
+                    UsernameInfoRow("Since", false) {
+                        Text(
+                            usernameDate(setAt),
+                            color = Pf.ink,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+       
